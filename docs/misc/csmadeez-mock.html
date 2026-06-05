@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Scene Mock — CsMadeEz style</title>
+<style>
+  /* ---- Fonts: Inter for titles, JetBrains Mono for the techy labels ---- */
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #000000;
+    --card: #0c0c0d;
+    --card-border: #232326;
+    --ink: #fafafa;
+    --muted: #6b7280;
+    --muted-dim: #4b5563;
+    --blue: #3b82f6;
+    --orange: #fb923c;
+    --red: #ef4444;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0b;
+    font-family: var(--sans);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  /* ---- The "video frame": fixed 16:9 stage, pure black ---- */
+  .stage {
+    position: relative;
+    width: 100%;
+    max-width: 1100px;
+    aspect-ratio: 16 / 9;
+    background: var(--bg);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+  }
+
+  /* faint radial vignette to add depth, like his frames */
+  .stage::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0,0,0,0.55) 100%);
+    pointer-events: none;
+  }
+
+  /* ---- Title block, top-left ---- */
+  .title {
+    position: absolute;
+    top: 6.5%;
+    left: 5%;
+    z-index: 5;
+  }
+  .title h1 {
+    font-size: clamp(20px, 3.4vw, 38px);
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--ink);
+  }
+  .title p {
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: clamp(9px, 1vw, 13px);
+    color: var(--muted);
+    letter-spacing: 0.5px;
+  }
+
+  /* ---- Connection line (the "Internet" backbone) ---- */
+  .wire {
+    position: absolute;
+    top: 50%;
+    left: 18%;
+    right: 18%;
+    height: 1px;
+    transform: translateY(-50%);
+    background-image: linear-gradient(to right, var(--muted-dim) 50%, transparent 50%);
+    background-size: 10px 1px;
+    background-repeat: repeat-x;
+    opacity: 0.55;
+  }
+  .wire-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -160%);
+    font-family: var(--mono);
+    font-size: clamp(11px, 1.3vw, 16px);
+    color: var(--muted);
+    letter-spacing: 3px;
+    z-index: 4;
+  }
+
+  /* ---- Packets: glowing dots travelling along the wire ---- */
+  .packet {
+    position: absolute;
+    top: 50%;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--blue);
+    box-shadow: 0 0 8px 2px rgba(59,130,246,0.9), 0 0 16px 4px rgba(59,130,246,0.4);
+    transform: translateY(-50%);
+    animation: flow linear infinite;
+  }
+  /* travel from client (18%) to server (82%) with slight vertical scatter */
+  @keyframes flow {
+    0%   { left: 18%; opacity: 0; transform: translateY(-50%) scale(0.6); }
+    8%   { opacity: 1; }
+    92%  { opacity: 1; }
+    100% { left: 82%; opacity: 0; transform: translateY(calc(-50% + var(--jit, 0px))) scale(0.6); }
+  }
+
+  /* ---- Cards (Client / Server) ---- */
+  .node {
+    position: absolute;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.01), 0 12px 40px rgba(0,0,0,0.5);
+    z-index: 3;
+  }
+
+  .client {
+    top: 50%; left: 7%;
+    transform: translateY(-50%);
+    width: 96px; height: 92px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px;
+  }
+  .client svg { width: 26px; height: 26px; stroke: var(--ink); fill: none; }
+  .client .lbl { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+  .server {
+    top: 50%; right: 5%;
+    transform: translateY(-50%);
+    width: 190px;
+    padding: 16px 16px 14px;
+    transition: border-color 0.4s ease, box-shadow 0.4s ease;
+  }
+  .server .row {
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .server .name { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .server .ip { font-family: var(--mono); font-size: 10px; color: var(--muted-dim); }
+
+  .server .cpu-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 16px;
+  }
+  .server .cpu-lbl { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; color: var(--muted); }
+  .server .cpu-val { font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--blue); transition: color 0.4s ease; }
+
+  .bar {
+    margin-top: 7px;
+    height: 4px;
+    border-radius: 4px;
+    background: #1b1b1e;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    width: 15%;
+    border-radius: 4px;
+    background: var(--blue);
+    transition: width 0.25s linear, background 0.4s ease;
+  }
+
+  /* overloaded state */
+  .server.hot {
+    border-color: rgba(239,68,68,0.55);
+    box-shadow: 0 0 22px rgba(239,68,68,0.18), 0 12px 40px rgba(0,0,0,0.5);
+  }
+  .server.hot .name { color: var(--red); }
+  .server.hot .cpu-val { color: var(--red); }
+  .server.hot .bar-fill { background: var(--red); }
+
+  .pill {
+    position: absolute;
+    top: -11px; left: 12px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: var(--red);
+    background: #1a0c0c;
+    border: 1px solid rgba(239,68,68,0.5);
+    border-radius: 6px;
+    padding: 2px 7px;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+  .server.hot .pill { opacity: 1; transform: translateY(0); }
+
+  /* ---- replay hint ---- */
+  .hint {
+    position: absolute;
+    bottom: 14px; right: 18px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted-dim);
+    z-index: 6;
+    cursor: pointer;
+    user-select: none;
+  }
+  .hint:hover { color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="title">
+      <h1 id="sceneTitle">Doing Too Much</h1>
+      <p id="sceneSub">One machine serving every request &mdash; until it can't.</p>
+    </div>
+
+    <div class="wire"></div>
+    <div class="wire-label">Internet</div>
+
+    <!-- packets injected by JS -->
+    <div id="packets"></div>
+
+    <!-- Client -->
+    <div class="node client">
+      <svg viewBox="0 0 24 24" stroke-width="1.6">
+        <rect x="2" y="4" width="20" height="13" rx="2"></rect>
+        <line x1="9" y1="20" x2="15" y2="20"></line>
+        <line x1="12" y1="17" x2="12" y2="20"></line>
+      </svg>
+      <span class="lbl">Client</span>
+    </div>
+
+    <!-- Origin Server -->
+    <div class="node server" id="server">
+      <div class="pill">&#9888; Overloaded</div>
+      <div class="row">
+        <span class="name">Origin Server</span>
+        <span class="ip">203.0.113.42</span>
+      </div>
+      <div class="cpu-row">
+        <span class="cpu-lbl">CPU LOAD</span>
+        <span class="cpu-val" id="cpuVal">15%</span>
+      </div>
+      <div class="bar"><div class="bar-fill" id="cpuBar"></div></div>
+    </div>
+
+    <div class="hint" id="replay">&#8635; replay</div>
+  </div>
+
+<script>
+  const packetsEl = document.getElementById('packets');
+  const server = document.getElementById('server');
+  const cpuVal = document.getElementById('cpuVal');
+  const cpuBar = document.getElementById('cpuBar');
+  const title = document.getElementById('sceneTitle');
+  const sub = document.getElementById('sceneSub');
+
+  // spawn N packets with staggered timing + vertical scatter
+  function spawnPackets(count, speed) {
+    packetsEl.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+      const p = document.createElement('div');
+      p.className = 'packet';
+      const jitter = (Math.random() * 60 - 30);          // -30..30px vertical drift
+      const startY = (Math.random() * 50 - 25);          // initial vertical offset
+      p.style.setProperty('--jit', jitter + 'px');
+      p.style.marginTop = startY + 'px';
+      p.style.animationDuration = speed + 's';
+      p.style.animationDelay = (-Math.random() * speed) + 's';
+      packetsEl.appendChild(p);
+    }
+  }
+
+  let raf, t0;
+  function runScene() {
+    server.classList.remove('hot');
+    title.textContent = 'Doing Too Much';
+    sub.innerHTML = 'One machine serving every request &mdash; until it can\'t.';
+    spawnPackets(4, 3.2);                                 // calm: few, slow
+
+    t0 = performance.now();
+    cancelAnimationFrame(raf);
+
+    function tick(now) {
+      const elapsed = (now - t0) / 1000;                 // seconds
+      // ramp CPU 15 -> 92 over 6s, ease-in
+      const k = Math.min(elapsed / 6, 1);
+      const eased = k * k;
+      const cpu = Math.round(15 + eased * 77);
+      cpuVal.textContent = cpu + '%';
+      cpuBar.style.width = cpu + '%';
+
+      if (cpu > 80 && !server.classList.contains('hot')) {
+        server.classList.add('hot');
+        title.textContent = 'The Surgery Suffers';
+        sub.innerHTML = 'Traffic spikes pile onto one box. Latency climbs, requests drop.';
+        spawnPackets(14, 1.3);                            // spike: many, fast
+      }
+      if (k < 1) raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+  }
+
+  document.getElementById('replay').addEventListener('click', runScene);
+  runScene();
+  // auto-loop every ~9s
+  setInterval(runScene, 9000);
+</script>
+</body>
+</html>
