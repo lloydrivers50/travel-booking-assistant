@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Closures Training Ground</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+  .chapter-bar { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--warn); font-weight: 700; margin-top: 14px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 24px 26px; min-height: 320px;
+  }
+
+  /* ---- scope visualizer ---- */
+  .viz { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-start; }
+  .viz-panel { flex: 1; min-width: 280px; }
+  .viz-panel > .vp-title { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-dim); font-weight: 700; margin-bottom: 10px; }
+  .stack { display: flex; flex-direction: column; gap: 10px; }
+  .frame {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 11px 13px; transition: border-color .25s, box-shadow .25s, opacity .25s, transform .25s;
+  }
+  .frame .f-label { font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 8px; font-family: "SF Mono", Menlo, monospace; }
+  .frame.global { opacity: .85; }
+  .frame.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 10px 28px -14px var(--accent); }
+  .frame.retained { border-style: dashed; border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 10px 30px -12px var(--good); }
+  .frame.retained .f-label::after { content: " · kept alive by closure"; color: var(--good); font-weight: 600; font-size: 10px; letter-spacing: .03em; }
+  .frame.popped { opacity: .32; text-decoration: line-through; }
+  .binds { display: flex; flex-wrap: wrap; gap: 7px; }
+  .bind {
+    font-family: "SF Mono", Menlo, monospace; font-size: 12px;
+    background: #0b0c14; border: 1px solid var(--line); border-left: 4px solid var(--bc, var(--line));
+    border-radius: 6px; padding: 3px 9px; color: #cdd2ee;
+  }
+  .bind b { color: #fff; font-weight: 700; margin-left: 5px; }
+  .clos { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .clo {
+    background: #11121d; border: 1px solid var(--line); border-radius: 11px; padding: 11px 13px;
+  }
+  .clo-name { font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: #6ea8ff; }
+  .clo-cap { font-size: 11.5px; color: var(--ink-dim); margin-top: 6px; }
+  .chip {
+    font-family: "SF Mono", Menlo, monospace; font-weight: 700; font-size: 11px;
+    background: color-mix(in srgb, var(--bc) 22%, #0b0c14); color: var(--bc);
+    border: 1px solid var(--bc); border-radius: 5px; padding: 1px 6px;
+  }
+  .clo-out { color: var(--good); font-weight: 700; font-family: "SF Mono", Menlo, monospace; }
+  .viz-note { margin-top: 16px; font-size: 13px; color: var(--ink-dim); border-top: 1px solid var(--line); padding-top: 12px; }
+  .viz-note b { color: var(--ink); }
+  .live-btns { display: flex; gap: 8px; margin: 14px 0 4px; flex-wrap: wrap; align-items: center; }
+  .live-btns .lbl { font-size: 12px; color: var(--ink-dim); }
+
+  /* ---- predict-then-reveal ---- */
+  .predict-code { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 4px 12px 0; margin-bottom: 16px; }
+  .predict-code .code-line { opacity: 1; }
+  .q { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .q .badge { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--warn); border: 1px solid var(--warn); border-radius: 999px; padding: 1px 8px; margin-right: 8px; }
+  .choices { display: flex; flex-direction: column; gap: 9px; max-width: 560px; }
+  .choice {
+    text-align: left; font-family: "SF Mono", Menlo, monospace; font-size: 13px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 14px;
+    color: var(--ink); cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .choice:hover { border-color: var(--accent); }
+  .choice.correct { border-color: var(--good); background: rgba(92,211,164,.12); color: #d6ffe9; }
+  .choice.wrong { border-color: var(--bad); background: rgba(246,137,107,.12); color: #ffe0d6; }
+  .choice .mark { float: right; font-weight: 800; }
+  .reveal { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; font-size: 13.5px; color: var(--ink); }
+  .reveal h4 { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--good); margin-bottom: 7px; }
+  .reveal.hidden { display: none; }
+
+  /* ---- code panel ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; }
+  .code-line { display: flex; font-size: 13px; line-height: 1.85; white-space: pre; border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .42; }
+  .code-line .ln { width: 38px; text-align: right; padding-right: 14px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; }
+
+  /* ---- tradeoff triangle table ---- */
+  .triangle { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+  .triangle th, .triangle td { border: 1px solid var(--line); padding: 10px 12px; text-align: center; }
+  .triangle th { color: var(--ink-dim); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
+  .triangle td.lab { text-align: left; font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: #cdd2ee; }
+  .yes { color: var(--bad); font-weight: 800; }
+  .no { color: var(--good); font-weight: 800; }
+  .triangle tr.win td { background: rgba(92,211,164,.08); }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.warn { background: rgba(246,182,87,.15); color: var(--warn); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .step-text code { font-size: 12px; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body b { color: var(--ink); }
+  .secondary-body code { font-size: 12px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">JavaScript · fundamentals → react payoff</div>
+  <h1>Closures Training Ground</h1>
+  <p class="sub">A closure is a function bundled with the variables it remembers.
+  Get that one idea exactly right — <b>it captures the variable, not a copy of the value</b> —
+  and the loop trap, private state, memory leaks, and React's stale-closure bug all collapse into
+  the same single mechanism. Predict before you peek; watch the scope frames build.</p>
+  <div class="chapter-bar" id="chapter"></div>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ Take-away</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · click a prediction to lock it in, then read the reveal</p>
+
+<script>
+/* ── syntax highlighter ─────────────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","typeof","of","in"]);
+const FN = new Set(["useState","useRef","useEffect","useInsertionEffect","useCallback",
+  "Promise","console","Map","Set","Array","Object","JSON","setTimeout","addEventListener","removeEventListener"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|([A-Za-z_$][\w$]*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+= KW.has(m[3])?'<span class="c-kw">'+m[3]+'</span>'
+                     : FN.has(m[3])?'<span class="c-fn">'+m[3]+'</span>': esc(m[3]);
+    else out+=esc(m[4]);
+  }
+  return out;
+}
+function codeLines(codeText, hot){
+  hot = hot || [];
+  return '<div class="code-panel">' + codeText.split("\n").map((line,idx)=>{
+    const n = idx+1;
+    const on = hot.includes(n) ? " hot" : "";
+    return '<div class="code-line'+on+'"><span class="ln">'+n+'</span><span class="code">'+(highlight(line)||" ")+'</span></div>';
+  }).join("") + '</div>';
+}
+
+/* ── palette for bindings/closures ──────────────────────────────────────── */
+const C = { blue:"#8b9bff", green:"#5cd3a4", amber:"#f6b657", coral:"#f6896b", purple:"#c79bff", sky:"#6ea8ff" };
+
+/* ════════════════════════ scope visualizer ═════════════════════════════ */
+function bindHTML(b){
+  const col = b.color ? 'style="--bc:'+b.color+'"' : '';
+  return '<span class="bind" '+col+'>'+esc(b.name)+'<b>'+esc(String(b.value))+'</b></span>';
+}
+function frameHTML(f){
+  const binds = (f.bindings||[]).map(bindHTML).join("");
+  return '<div class="frame '+(f.kind||'')+'"><div class="f-label">'+esc(f.label)+'</div>'+
+         '<div class="binds">'+(binds||'<span class="bind">—</span>')+'</div></div>';
+}
+function cloHTML(c){
+  const cap = c.capLabel
+    ? 'closes over <span class="chip" style="--bc:'+(c.capColor||C.blue)+'">'+esc(c.capLabel)+'</span> → <span class="clo-out" '+(c.outId?'id="'+c.outId+'"':'')+'>'+esc(String(c.out))+'</span>'
+    : '';
+  return '<div class="clo"><div class="clo-name">'+esc(c.name)+'</div>'+
+         (cap?'<div class="clo-cap">'+cap+'</div>':'')+'</div>';
+}
+function panelHTML(p){
+  const frames = (p.frames||[]).map(frameHTML).join("");
+  const clos = (p.closures||[]).length
+    ? '<div class="clos" style="margin-top:14px;">'+p.closures.map(cloHTML).join("")+'</div>' : '';
+  return '<div class="viz-panel">'+
+    (p.title?'<div class="vp-title">'+esc(p.title)+'</div>':'')+
+    '<div class="stack">'+frames+'</div>'+clos+'</div>';
+}
+function sceneHTML(scene){
+  const panels = (scene.panels||[]).map(panelHTML).join("");
+  let live = "";
+  if(scene.live){
+    live = '<div class="live-btns"><span class="lbl">'+esc(scene.live.label)+'</span>'+
+      scene.live.buttons.map((b,k)=>'<button data-live="'+k+'">'+esc(b.text)+'</button>').join("")+'</div>';
+  }
+  const note = scene.note ? '<div class="viz-note">'+scene.note+'</div>' : '';
+  return '<div class="viz">'+panels+'</div>'+live+note;
+}
+let liveState = null;
+function wireScene(scene){
+  if(!scene.live) return;
+  liveState = { val: scene.live.start, scene };
+  const apply = ()=>{
+    scene.live.outputs.forEach(o=>{
+      const el = document.getElementById(o.id);
+      if(el) el.textContent = o.compute(liveState.val);
+    });
+    scene.live.binds && scene.live.binds.forEach(bd=>{
+      const el = document.getElementById(bd.id);
+      if(el) el.textContent = String(liveState.val);
+    });
+  };
+  document.querySelectorAll('[data-live]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const b = scene.live.buttons[+btn.dataset.live];
+      liveState.val = b.apply(liveState.val);
+      apply();
+    };
+  });
+  apply();
+}
+
+/* ════════════════════════ predict-then-reveal ══════════════════════════ */
+function predictHTML(step){
+  const p = step.predict;
+  const code = '<div class="predict-code">'+codeLines(p.code).slice('<div class="code-panel">'.length, -'</div>'.length)+'</div>';
+  const revealed = step._revealed;
+  const choices = p.choices.map((c,k)=>{
+    let cls = "choice", mark = "";
+    if(revealed){
+      if(k === p.answer){ cls += " correct"; mark = '<span class="mark">✓</span>'; }
+      else if(k === step._chosen){ cls += " wrong"; mark = '<span class="mark">✗</span>'; }
+    }
+    return '<button class="'+cls+'" data-choice="'+k+'"'+(revealed?' disabled':'')+'>'+mark+esc(c)+'</button>';
+  }).join("");
+  const reveal = '<div class="reveal'+(revealed?'':' hidden')+'"><h4>Why</h4>'+p.explain+'</div>';
+  return code +
+    '<div class="q"><span class="badge">Predict</span>'+p.q+'</div>'+
+    '<div class="choices">'+choices+'</div>'+ reveal;
+}
+function wirePredict(step){
+  if(step._revealed) return;
+  document.querySelectorAll('[data-choice]').forEach(btn=>{
+    btn.onclick = ()=>{
+      step._chosen = +btn.dataset.choice;
+      step._revealed = true;
+      render();           // re-render this step in revealed state
+    };
+  });
+}
+
+/* ════════════════════════ THE STEPS ════════════════════════════════════ */
+const steps = [
+  /* ---------- CH.1 FOUNDATION ---------- */
+  {
+    chapter: "1 · Foundation",
+    title: "One sentence, then we earn it",
+    text: "A <b>closure</b> is a function plus the <b>lexical environment</b> it was born in — the set of "+
+          "outer variables it can still see. \"Lexical\" just means <i>decided by where the code is written</i>, "+
+          "not where it's called. Every function in JS is a closure; it only gets interesting when the function "+
+          "<b>outlives</b> the scope that created it. That's what this stage will show you, frame by frame.",
+    secHead: "★ Mental model",
+    secondary: "Don't picture a closure as \"a function that copied some values.\" Picture a function holding a "+
+               "<b>live wire</b> back to the variables themselves. Hold that image — every screen tests it.",
+    scene: {
+      panels: [{
+        title: "call stack",
+        frames: [{ label:"Global", kind:"global", bindings:[
+          {name:"makeMultiplier =", value:"ƒ"},
+          {name:"triple =", value:"undefined"}
+        ]}]
+      }],
+      note: "We'll run <code>const triple = makeMultiplier(3)</code> across the next few steps and watch the "+
+            "environment that <b>survives</b> after <code>makeMultiplier</code> returns."
+    }
+  },
+  {
+    chapter: "1 · Foundation",
+    title: "Push a frame: makeMultiplier(3)",
+    tag: { kind:"warn", label:"step-through" },
+    text: "Calling a function pushes a new <b>stack frame</b> — a fresh box of local variables. "+
+          "<code>makeMultiplier(3)</code> creates a frame where the parameter <code>factor</code> is bound to "+
+          "<b>3</b> (blue). Inside, it builds and returns an arrow function <code>n => n * factor</code>. "+
+          "That inner function is defined <i>here</i>, so its lexical home is this frame.",
+    secHead: "★ Term: binding",
+    secondary: "A <b>binding</b> is the name-to-storage link, like <code>factor → [box holding 3]</code>. "+
+               "The closure will capture the <i>box</i>, not the number 3. Keep that distinction loaded.",
+    scene: {
+      panels: [{
+        title: "call stack",
+        frames: [
+          { label:"Global", kind:"global", bindings:[
+            {name:"makeMultiplier =", value:"ƒ"}, {name:"triple =", value:"undefined"}]},
+          { label:"makeMultiplier(3)", kind:"active", bindings:[{name:"factor =", value:"3", color:C.blue}]}
+        ],
+        closures: [{ name:"n => n * factor", capLabel:"factor", capColor:C.blue, out:"(returned)" }]
+      }],
+      note: "The inner arrow points back at <span class=\"chip\" style=\"--bc:#8b9bff\">factor</span> "+
+            "in the frame that's currently on the stack."
+    }
+  },
+  {
+    chapter: "1 · Foundation",
+    title: "Return — but the frame doesn't die",
+    tag: { kind:"good", label:"the closure" },
+    text: "Normally when a function returns, its frame is popped and garbage-collected. But here the returned "+
+          "arrow <b>still references <code>factor</code></b>. JavaScript can't throw the frame away while something "+
+          "points into it — so the <code>makeMultiplier</code> environment is <b>retained</b> (dashed green), detached "+
+          "from the stack but kept alive. <b>That retained environment is the closure.</b> <code>triple</code> now holds the arrow.",
+    secHead: "★ This is the whole trick",
+    secondary: "A function that outlives its birthplace drags its variable environment along with it. The variables "+
+               "don't vanish at <code>return</code>; they live exactly as long as some closure can still reach them.",
+    scene: {
+      panels: [{
+        title: "call stack  +  retained env",
+        frames: [
+          { label:"Global", kind:"global", bindings:[
+            {name:"makeMultiplier =", value:"ƒ"}, {name:"triple =", value:"ƒ"}]},
+          { label:"makeMultiplier(3) env", kind:"retained", bindings:[{name:"factor =", value:"3", color:C.blue}]}
+        ],
+        closures: [{ name:"triple = n => n * factor", capLabel:"factor", capColor:C.blue, out:"(not called yet)" }]
+      }],
+      note: "Stack popped, but the green frame stays because <code>triple</code> still reaches "+
+            "<span class=\"chip\" style=\"--bc:#8b9bff\">factor</span>."
+    }
+  },
+  {
+    chapter: "1 · Foundation",
+    title: "Call it: triple(10) → 30",
+    text: "Now <code>triple(10)</code> pushes its own frame with <code>n = 10</code> (green). To resolve "+
+          "<code>factor</code>, JS walks the <b>scope chain</b>: not in this frame → look at the lexical parent → "+
+          "the retained <code>makeMultiplier</code> env → found, <b>3</b>. Result <code>10 * 3 = 30</code>. The "+
+          "closure didn't store 30; it reached back through a live link and read <code>factor</code> on demand.",
+    secHead: "★ Scope chain",
+    secondary: "Name lookup is <b>outward</b>, link by link, until found or it hits Global. Inner scopes see outer; "+
+               "outer never sees inner. That direction is the entire reason a closure can reach <code>factor</code> "+
+               "but the outside world can't reach <code>n</code>.",
+    scene: {
+      panels: [{
+        title: "call stack  +  retained env",
+        frames: [
+          { label:"Global", kind:"global", bindings:[{name:"triple =", value:"ƒ"}]},
+          { label:"makeMultiplier(3) env", kind:"retained", bindings:[{name:"factor =", value:"3", color:C.blue}]},
+          { label:"triple(10)", kind:"active", bindings:[{name:"n =", value:"10", color:C.green}]}
+        ],
+        closures: [{ name:"n => n * factor", capLabel:"factor", capColor:C.blue, out:"30" }]
+      }],
+      note: "<b>n</b> from the active frame, <b>factor</b> from the retained env up the chain → <span class=\"clo-out\">30</span>."
+    }
+  },
+
+  /* ---------- CH.2 THE CRUX ---------- */
+  {
+    chapter: "2 · The crux",
+    title: "Binding, not value — prove it to yourself",
+    text: "Everything above hinged on one claim: a closure captures the <b>variable</b>, not a frozen copy of its "+
+          "value. Time to commit. Read the snippet and lock in your prediction before the reveal.",
+    secHead: "★ Why this screen matters",
+    secondary: "If your gut says \"40\", you're still picturing a value-snapshot. The whole rest of the page "+
+               "(loops, modules, React staleness) only makes sense once this one is wired correctly.",
+    predict: {
+      code: "let factor = 10;\nconst quad = makeMultiplier(factor); // factor is 10 here\nfactor = 99;                          // reassign AFTER capturing\n\n// makeMultiplier(f) returned: n => n * f\nconsole.log(quad(4));",
+      q: "What does <code>quad(4)</code> log?",
+      choices: ["40 — it captured factor's value (10) at call time", "396 — it re-reads the outer factor, now 99", "4 — factor is undefined inside", "ReferenceError"],
+      answer: 0,
+      explain: "<b>40.</b> Subtle but crucial: <code>makeMultiplier(factor)</code> <b>passes the value</b> 10 into the "+
+        "parameter <code>f</code>. <code>f</code> is a brand-new binding inside the call; reassigning the outer "+
+        "<code>factor</code> to 99 afterward doesn't touch <code>f</code>. So the closure over <code>f</code> still reads 10. "+
+        "<i>The lesson cuts both ways:</i> a closure tracks the <b>binding it actually closed over</b> — here that's "+
+        "<code>f</code>, not <code>factor</code>. Next screen shows the version where it DOES re-read and surprises people."
+    }
+  },
+  {
+    chapter: "2 · The crux",
+    title: "Now the live-wire version",
+    tag: { kind:"warn", label:"interactive" },
+    text: "Here two closures close over the <b>same</b> outer variable <code>count</code> and we mutate it "+
+          "<i>after</i> they were created. Click the buttons: both closures report the <b>current</b> value, never a "+
+          "stale snapshot. They share one box — that's binding capture made visible.",
+    secHead: "★ The crux, one line",
+    secondary: "<b>A closure reads the variable at call time, not at creation time.</b> If the binding's value changed "+
+               "since the closure was born, the closure sees the new value. Burn this in.",
+    scene: {
+      panels: [{
+        title: "one shared environment",
+        frames: [{ label:"counter env", kind:"retained", bindings:[{name:"count =", value:"0", color:C.amber}]}],
+        closures: [
+          { name:"getCount = () => count", capLabel:"count", capColor:C.amber, out:"0", outId:"live-a" },
+          { name:"isEven  = () => count % 2 === 0", capLabel:"count", capColor:C.amber, out:"true", outId:"live-b" }
+        ]
+      }],
+      live: {
+        label:"mutate the shared count:",
+        start: 0,
+        buttons: [
+          { text:"count++", apply:v=>v+1 },
+          { text:"count += 10", apply:v=>v+10 },
+          { text:"reset", apply:()=>0 }
+        ],
+        binds: [{ id:"bind-count" }],
+        outputs: [
+          { id:"live-a", compute:v=>String(v) },
+          { id:"live-b", compute:v=>String(v % 2 === 0) }
+        ]
+      },
+      note: "Both closures point at the same <span class=\"chip\" style=\"--bc:#f6b657\">count</span> box. "+
+            "Change it once, both see it. <b>No copies anywhere.</b>"
+    }
+  },
+
+  /* ---------- CH.3 THE LOOP TRAP ---------- */
+  {
+    chapter: "3 · The loop trap",
+    title: "The most famous closure bug — predict it",
+    text: "This is the interview classic and a real bug people ship. Three timers, each logging <code>i</code>. "+
+          "Lock in what prints before revealing — and notice it's <code>var</code>.",
+    secHead: "★ Read the keyword",
+    secondary: "The bug lives entirely in the word <code>var</code>. Same loop with <code>let</code> behaves "+
+               "differently — you'll see exactly why two screens from now.",
+    predict: {
+      code: "for (var i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 100);\n}\n// what prints (each on its own line)?",
+      q: "After 100ms, the three callbacks log:",
+      choices: ["0, 1, 2", "3, 3, 3", "0, 0, 0", "1, 2, 3"],
+      answer: 1,
+      explain: "<b>3, 3, 3.</b> With <code>var</code>, there is exactly <b>one</b> <code>i</code> — function-scoped, "+
+        "shared by the whole loop. The loop finishes (running <code>i</code> up to 3) long before any timeout fires. "+
+        "All three callbacks closed over the <b>same</b> <code>i</code> binding, so when they finally run they each "+
+        "read its final value: 3. Classic binding-not-value: not three snapshots, one shared box read late."
+    }
+  },
+  {
+    chapter: "3 · The loop trap",
+    title: "Why: one box, three pointers",
+    tag: { kind:"bad", label:"the bug" },
+    text: "<code>var</code> is <b>function-scoped</b>, so the loop creates a single <code>i</code> binding (coral). "+
+          "Each iteration registers a callback that closes over <i>that one box</i>. The loop runs to completion, "+
+          "leaving <code>i = 3</code>. Only then do the timers fire — all three read the same box → <b>3, 3, 3</b>.",
+    secHead: "★ Diagnosis",
+    secondary: "Nothing was copied per-iteration. Three closures, one binding. The timing (async) just makes the "+
+               "shared-binding nature impossible to miss.",
+    scene: {
+      panels: [{
+        title: "var — one shared binding",
+        frames: [{ label:"function scope", kind:"retained", bindings:[{name:"i =", value:"3", color:C.coral}]}],
+        closures: [
+          { name:"timeout #1", capLabel:"i", capColor:C.coral, out:"3" },
+          { name:"timeout #2", capLabel:"i", capColor:C.coral, out:"3" },
+          { name:"timeout #3", capLabel:"i", capColor:C.coral, out:"3" }
+        ]
+      }],
+      note: "All three chips are the <b>same colour</b> on purpose — same box. Read late, after the loop set it to 3."
+    }
+  },
+  {
+    chapter: "3 · The loop trap",
+    title: "The fix: let — and predict again",
+    text: "Change one keyword: <code>var</code> → <code>let</code>. Same structure, same timers. Predict the output "+
+          "now, then we'll open up why a single keyword flips the result.",
+    secHead: "★ One-keyword fix",
+    secondary: "No IIFE, no <code>.bind</code>, no extra argument. Just block scoping. The reveal explains the "+
+               "per-iteration binding rule that makes it work.",
+    predict: {
+      code: "for (let i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 100);\n}\n// now what prints?",
+      q: "With <code>let</code>, the three callbacks log:",
+      choices: ["3, 3, 3", "0, 1, 2", "0, 0, 0", "still 3, 3, 3 — async ruins it"],
+      answer: 1,
+      explain: "<b>0, 1, 2.</b> <code>let</code> is <b>block-scoped</b>, and the spec gives the for-loop a special rule: "+
+        "it creates a <b>fresh <code>i</code> binding for every iteration</b> and copies the previous value in. So "+
+        "iteration 0's callback closes over an <code>i</code>-box that is forever 0, iteration 1 over a different box "+
+        "(1), iteration 2 over a third (2). Three boxes, not one — each closure reads its own."
+    }
+  },
+  {
+    chapter: "3 · The loop trap",
+    title: "Why let works: three separate boxes",
+    tag: { kind:"good", label:"the fix" },
+    text: "Per-iteration binding means each loop turn mints a <b>new</b> <code>i</code> — different colour, different "+
+          "box. The callback created that turn closes over <i>its own</i> box, whose value never changes after the "+
+          "turn ends. So the timers read 0, 1, 2. Same async timing as before; the difference is purely how many "+
+          "bindings exist.",
+    secHead: "★ Pre-ES6 trick",
+    secondary: "Before <code>let</code>, you forced a new box by hand with an IIFE — an Immediately-Invoked Function "+
+               "Expression: <code>(function(j){ setTimeout(()=>console.log(j)) })(i)</code>. Calling a function makes a "+
+               "fresh parameter binding <code>j</code> per iteration. <code>let</code> automates exactly that.",
+    scene: {
+      panels: [{
+        title: "let — a fresh binding per iteration",
+        frames: [
+          { label:"iteration 0 block", kind:"retained", bindings:[{name:"i =", value:"0", color:C.blue}]},
+          { label:"iteration 1 block", kind:"retained", bindings:[{name:"i =", value:"1", color:C.green}]},
+          { label:"iteration 2 block", kind:"retained", bindings:[{name:"i =", value:"2", color:C.amber}]}
+        ],
+        closures: [
+          { name:"timeout #1", capLabel:"i", capColor:C.blue,  out:"0" },
+          { name:"timeout #2", capLabel:"i", capColor:C.green, out:"1" },
+          { name:"timeout #3", capLabel:"i", capColor:C.amber, out:"2" }
+        ]
+      }],
+      note: "Three <b>different</b> colours = three different boxes. Each closure owns one. That's the whole fix."
+    }
+  },
+
+  /* ---------- CH.4 SHARED STATE & MODULES ---------- */
+  {
+    chapter: "4 · Private state",
+    title: "Shared state on purpose: a counter module",
+    tag: { kind:"warn", label:"interactive" },
+    text: "The same shared-box mechanic that caused the loop bug is also a <b>feature</b>. <code>makeCounter()</code> "+
+          "returns three functions that all close over one private <code>count</code>. Click them — they cooperate on "+
+          "the same hidden variable. Nothing outside can touch <code>count</code> directly.",
+    secHead: "★ Closures = original private fields",
+    secondary: "Before <code>#private</code> class fields, this was <i>the</i> way to get encapsulation in JS. "+
+               "<code>count</code> isn't on any object and isn't global — it exists only inside the closure's "+
+               "environment, reachable solely through the methods you returned.",
+    scene: {
+      panels: [{
+        title: "makeCounter() — one private env, three methods",
+        frames: [{ label:"makeCounter env", kind:"retained", bindings:[{name:"count =", value:"0", color:C.purple}]}],
+        closures: [
+          { name:"inc = () => ++count", capLabel:"count", capColor:C.purple, out:"0", outId:"cnt-a" },
+          { name:"dec = () => --count", capLabel:"count", capColor:C.purple, out:"0", outId:"cnt-b" },
+          { name:"get = () =>   count", capLabel:"count", capColor:C.purple, out:"0", outId:"cnt-c" }
+        ]
+      }],
+      live: {
+        label:"call the methods:",
+        start: 0,
+        buttons: [
+          { text:"inc()", apply:v=>v+1 },
+          { text:"dec()", apply:v=>v-1 },
+          { text:"reset", apply:()=>0 }
+        ],
+        outputs: [
+          { id:"cnt-a", compute:v=>String(v) },
+          { id:"cnt-b", compute:v=>String(v) },
+          { id:"cnt-c", compute:v=>String(v) }
+        ]
+      },
+      note: "There is no <code>counter.count</code> to poke from outside. The only door to <span class=\"chip\" "+
+            "style=\"--bc:#c79bff\">count</span> is the three methods. <b>That's encapsulation, built from a closure.</b>"
+    }
+  },
+
+  /* ---------- CH.5 MEMORY ---------- */
+  {
+    chapter: "5 · Memory",
+    title: "Closures keep their environment alive",
+    text: "Garbage collection frees memory nothing can reach. A closure is a <b>reachability anchor</b>: as long as "+
+          "the closure is alive, every variable in its captured environment is alive too — it can't be collected. "+
+          "That's the mechanism behind retained frames you've seen all along.",
+    secHead: "★ Power and footgun",
+    secondary: "Useful: that's how private state persists. Dangerous: capture a giant object you only briefly need, "+
+               "keep the closure around, and you pin the whole thing in memory — an accidental leak.",
+    scene: {
+      panels: [{
+        title: "what keeps the env alive",
+        frames: [{ label:"heavy() env", kind:"retained", bindings:[
+          {name:"bigData =", value:"[10MB]", color:C.coral},
+          {name:"id =", value:"7", color:C.blue}
+        ]}],
+        closures: [{ name:"getId = () => id", capLabel:"id (only)", capColor:C.blue, out:"7" }]
+      }],
+      note: "<b>The leak:</b> <code>getId</code> only needs <code>id</code> — but a closure captures the whole "+
+            "environment record, so <span class=\"chip\" style=\"--bc:#f6896b\">bigData</span> stays pinned too as "+
+            "long as <code>getId</code> lives. Fix: don't return long-lived closures over scopes that also hold big "+
+            "data, or null the big reference before returning."
+  }
+  },
+
+  /* ---------- CH.6 ADVANCED ---------- */
+  {
+    chapter: "6 · Applied closures",
+    title: "Partial application & currying",
+    text: "These \"advanced\" techniques are just closures with a nice name. <b>Partial application</b>: pre-fill some "+
+          "arguments and return a function waiting for the rest — the pre-filled values live in the closure. "+
+          "<b>Currying</b> is the same idea taken one argument at a time.",
+    secHead: "★ It's all capture",
+    secondary: "<code>const add = a => b => a + b;</code> — <code>add(5)</code> returns a closure over "+
+               "<code>a = 5</code>; later <code>add(5)(3)</code> reads that captured 5 and adds 3. No new concept, "+
+               "just the live-wire you already understand.",
+    scene: {
+      panels: [{
+        title: "const add5 = add(5)",
+        frames: [{ label:"add(5) env", kind:"retained", bindings:[{name:"a =", value:"5", color:C.green}]}],
+        closures: [{ name:"add5 = b => a + b", capLabel:"a", capColor:C.green, out:"add5(3) → 8" }]
+      }],
+      note: "<code>add5</code> is a closure carrying <span class=\"chip\" style=\"--bc:#5cd3a4\">a = 5</span>. "+
+            "Reusable, configured, zero classes."
+    }
+  },
+  {
+    chapter: "6 · Applied closures",
+    title: "Memoization: a cache that lives in the closure",
+    text: "A <b>memoized</b> function caches results so repeat calls with the same input skip the work. Where does "+
+          "the cache live between calls? In the closure. The returned function closes over a private "+
+          "<code>cache</code> Map that persists across every call — same pattern as the counter, used for speed.",
+    secHead: "★ Same shape, again",
+    secondary: "Private persistent state (the cache) + a function that reads/writes it = closure. Once you see the "+
+               "pattern, half of \"functional JavaScript\" is just this.",
+    scene: {
+      panels: [{
+        title: "memoize(slowFn)",
+        frames: [{ label:"memoize env", kind:"retained", bindings:[{name:"cache =", value:"Map{ 4 → 16 }", color:C.sky}]}],
+        closures: [{ name:"memoized = x => cache.has(x) ? cache.get(x) : compute(x)", capLabel:"cache", capColor:C.sky, out:"hit → 16" }]
+      }],
+      note: "Second call with <code>4</code> reads the captured <span class=\"chip\" style=\"--bc:#6ea8ff\">cache</span> "+
+            "and returns instantly. The cache survives because the closure keeps its env alive (Ch.5)."
+    }
+  },
+
+  /* ---------- CH.7 THE PAYOFF ---------- */
+  {
+    chapter: "7 · The payoff (React)",
+    title: "Stale closure: a captured box that went out of date",
+    tag: { kind:"bad", label:"the bug class" },
+    text: "Now the bug you came for. A <b>stale closure</b> is just a closure still reading a binding whose <i>relevant</i> "+
+          "value has moved on — because something newer exists in a binding the closure <b>didn't</b> capture. The "+
+          "for-<code>var</code> loop was one flavour. React manufactures this constantly, because every render makes "+
+          "<b>new</b> bindings.",
+    secHead: "★ The setup",
+    secondary: "React re-runs your component function on every render. Each run creates <b>fresh</b> local consts — "+
+               "new <code>props</code>, new state, new inline functions. A function captured during render #1 closes "+
+               "over render #1's bindings <i>forever</i>.",
+    scene: {
+      panels: [
+        { title: "render #1 (captured)", frames: [
+            { label:"render #1 env", kind:"retained", bindings:[{name:"count =", value:"0", color:C.coral}]}],
+          closures:[{ name:"handler #1 = () => count", capLabel:"count", capColor:C.coral, out:"0  ← stale" }]},
+        { title: "render #2 (current)", frames: [
+            { label:"render #2 env", kind:"active", bindings:[{name:"count =", value:"1", color:C.green}]}],
+          closures:[{ name:"handler #2 = () => count", capLabel:"count", capColor:C.green, out:"1" }]}
+      ],
+      note: "If an effect subscribed <b>handler #1</b> and never re-subscribed, the live UI keeps firing the coral "+
+            "closure — reading <b>0</b> while the real count is <b>1</b>. That's a stale closure."
+    }
+  },
+  {
+    chapter: "7 · The payoff (React)",
+    title: "The trap has two bad exits",
+    tag: { kind:"warn", label:"the dilemma" },
+    text: "Your effect adds a listener and lists the handler in its dependency array. You're forced to choose, and "+
+          "<b>both naive choices are wrong</b>. List the handler → it's a new function each render → the effect tears "+
+          "down and re-subscribes every render (<b>thrash</b>). Use an empty <code>[]</code> → it subscribes once but "+
+          "freezes render #1's handler (<b>stale closure</b>).",
+    secHead: "★ Thrash, defined",
+    secondary: "<b>Thrash</b> = an effect repeatedly undoing and redoing its own work for no benefit — here "+
+               "<code>removeEventListener</code> + <code>addEventListener</code> on <i>every</i> render. Wasteful, and "+
+               "on a hot path (streaming tokens) it's dozens of times a second.",
+    stageHTML: '<table class="triangle"><thead><tr><th style="text-align:left;">approach</th><th>thrash?</th><th>stale closure?</th></tr></thead><tbody>'+
+      '<tr><td class="lab">deps: [handler] &nbsp;<span style="color:#9a9cb8">(new fn each render)</span></td><td class="yes">YES</td><td class="no">no</td></tr>'+
+      '<tr><td class="lab">deps: [] &nbsp;<span style="color:#9a9cb8">(subscribe once)</span></td><td class="no">no</td><td class="yes">YES</td></tr>'+
+      '<tr class="win"><td class="lab">useStableCallback(handler)</td><td class="no">no</td><td class="no">no</td></tr>'+
+      '</tbody></table>'+
+      '<div class="viz-note">The first two rows are the dilemma. The green row is the escape — and it\'s pure closure mechanics. Next screen: how.</div>'
+  },
+  {
+    chapter: "7 · The payoff (React)",
+    title: "useStableCallback: late write + late read",
+    tag: { kind:"good", label:"the escape" },
+    text: "The escape splits identity from behaviour. <b>Line 2</b> makes a <code>ref</code> — a stable box that "+
+          "survives every render and does <i>not</i> trigger re-renders. <b>Line 4</b> (an effect that runs on every "+
+          "render) <b>writes the newest <code>fn</code></b> into that box: <i>late write</i>. <b>Line 6</b> returns one "+
+          "frozen wrapper that, when called, <b>reads <code>ref.current</code> right then</b> and invokes it: "+
+          "<i>late read</i>. Frozen outside, fresh inside.",
+    secHead: "★ Map it to the triangle",
+    secondary: "<b>No thrash</b>: the wrapper's identity is frozen by <code>useCallback(fn, [])</code> (line 7), so "+
+               "the effect's dep never changes → subscribe once. <b>No stale closure</b>: line 4 keeps the box current "+
+               "and line 6 reads it at call time → always the latest <code>fn</code>. Both columns: no.",
+    code: "function useStableCallback(fn) {\n  const ref = useRef(fn);              // stable box, no re-renders\n  useInsertionEffect(() => {\n    ref.current = fn;                  // LATE WRITE: newest fn every render\n  });\n  return useCallback(\n    (...args) => ref.current(...args),  // LATE READ: resolve at call time\n    []                                 // frozen identity → no thrash\n  );\n}",
+    codeHot: [2,3,4,6,8]
+  },
+  {
+    chapter: "7 · The payoff (React)",
+    title: "Why useInsertionEffect, not useEffect",
+    tag: { kind:"warn", label:"the footnote" },
+    text: "One precision detail. The write on line 4 uses <code>useInsertionEffect</code>, which runs "+
+          "<b>synchronously at commit, before the browser paints</b>. A plain <code>useEffect</code> runs "+
+          "<i>after</i> paint — leaving a gap where the screen is live but <code>ref.current</code> still holds the "+
+          "<b>old</b> <code>fn</code>. An event firing in that gap would invoke the stale function. "+
+          "<code>useInsertionEffect</code> closes the gap.",
+    secHead: "★ File-and-move-on",
+    secondary: "You don't need to derive this to <i>use</i> the pattern correctly — the real file even carries a "+
+               "\"don't simplify this to useEffect\" comment so future-you doesn't reopen it. Know it exists; move on.",
+    scene: {
+      panels: [{
+        title: "the gap useEffect would leave",
+        frames: [
+          { label:"commit (DOM live)", kind:"active", bindings:[{name:"ref.current =", value:"OLD fn", color:C.coral}]},
+          { label:"…browser paints…", kind:"global", bindings:[{name:"event fires here", value:"→ stale!", color:C.coral}]},
+          { label:"useEffect runs (too late)", kind:"popped", bindings:[{name:"ref.current =", value:"new fn", color:C.green}]}
+        ]
+      }],
+      note: "<code>useInsertionEffect</code> moves the green write <b>before</b> paint, so no event can ever catch the coral box."
+    }
+  },
+  {
+    chapter: "7 · The payoff (React)",
+    title: "Where it lands: useAutoScroll",
+    tag: { kind:"good", label:"home" },
+    text: "The consumer. <code>useAutoScroll</code> subscribes a <code>scroll</code> listener. It wraps the handler "+
+          "in <code>useStableCallback</code>, so the subscribe-effect's dependency (<code>[onScroll]</code>) never "+
+          "changes → <b>subscribes exactly once</b>, no thrash. And because the wrapper late-reads, the listener always "+
+          "runs the freshest handler → <b>no stale closure</b>. In <i>this</i> hook the handler only touches stable "+
+          "refs, so it's safe-by-default rather than a bug fix — but you now own the mechanism for when it isn't.",
+    secHead: "★ scrollTop lives on the DOM",
+    secondary: "Worth remembering from the live debugging: a new handler identity never resets scroll position. "+
+               "<code>scrollTop</code> lives on the real DOM node, which React reuses across renders. New closures "+
+               "affect <b>whether the effect re-subscribes</b> — never the DOM's own state.",
+    code: "const onScroll = useStableCallback(() => {\n  const el = ref.current;\n  if (!el) return;\n  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;\n  setPinned(distance < 80);\n});\n\nuseEffect(() => {\n  const el = ref.current;\n  if (!el) return;\n  el.addEventListener(\"scroll\", onScroll, { passive: true });\n  return () => el.removeEventListener(\"scroll\", onScroll);\n}, [onScroll]);            // stable → subscribe ONCE, always fresh",
+    codeHot: [1,9,12,13,14]
+  },
+  {
+    chapter: "7 · The payoff (React)",
+    title: "One mechanism, eight faces",
+    text: "Trace the spine back: scope chain → capture the <b>binding, not the value</b> → that one idea is the loop "+
+          "trap, shared state, the module pattern, memory retention, currying, memoization, <b>and</b> the React "+
+          "stale-closure fix. You didn't learn eight things. You learned one thing and watched it wear eight masks.",
+    secHead: "★ Banked",
+    secondary: "Test yourself cold: \"a closure captures the ____, not the ____\" — and \"useStableCallback avoids "+
+               "thrash via line ___ and avoids staleness via lines ___ + ___.\" If those come fast, the concept is "+
+               "yours. Close the tab and go build the DECIDE half.",
+    scene: {
+      panels: [{
+        title: "the one mechanism",
+        frames: [{ label:"capture = a live link to the variable's box", kind:"retained", bindings:[
+          {name:"binding", value:"shared & mutable", color:C.purple}]}],
+        closures: [
+          { name:"loop trap", capLabel:"one box, read late", capColor:C.coral, out:"3,3,3" },
+          { name:"module / counter", capLabel:"private box", capColor:C.amber, out:"encapsulation" },
+          { name:"memoize", capLabel:"persistent box", capColor:C.sky, out:"cache" },
+          { name:"stale closure → useStableCallback", capLabel:"late read of ref box", capColor:C.green, out:"always fresh" }
+        ]
+      }],
+      note: "Same live-wire every time. That's the whole subject."
+    }
+  }
+];
+
+/* ── per-step stage dispatch ────────────────────────────────────────────── */
+function renderStage(step){
+  const stage = document.getElementById("stage");
+  if(step.predict){ stage.innerHTML = predictHTML(step); wirePredict(step); }
+  else if(step.code){ stage.innerHTML = codeLines(step.code, step.codeHot); }
+  else if(step.scene){ stage.innerHTML = sceneHTML(step.scene); wireScene(step.scene); }
+  else if(step.stageHTML){ stage.innerHTML = step.stageHTML; }
+  else { stage.innerHTML = ""; }
+}
+
+/* ════ stepper engine ════════════════════════════════════════════════════ */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+  document.getElementById("chapter").textContent = s.chapter || "";
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("sec-head").textContent = s.secHead || "★ Take-away";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 4200);
+};
+document.addEventListener("keydown", e => {
+  if (e.target && (e.target.tagName === "BUTTON")) return;
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

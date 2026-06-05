@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Streaming transport · mint-id → 202 → decoupled SSE → fan-out</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 820px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 24px 26px; min-height: 340px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 13px 15px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 13.5px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 11.5px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+
+  /* ---- transport diagram ---- */
+  .lane { display: grid; grid-template-columns: 150px 1fr 200px; gap: 14px; align-items: stretch; }
+  .lane .col-h { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 6px; text-align:center; }
+  .box {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; font-size: 12.5px; transition: all .25s; height: 100%;
+  }
+  .box.hot { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); transform: translateY(-2px); }
+  .box.good.hot { border-color: var(--good); box-shadow: 0 0 0 1px var(--good); }
+  .box.bad.hot { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+  .box .bt { font-weight: 700; font-size: 12.5px; }
+  .box .bd { color: var(--ink-dim); font-size: 11px; margin-top: 4px; }
+  .arrow { text-align: center; color: var(--ink-dim); font-size: 11px; margin: 6px 0; }
+  .pulse { color: var(--accent); font-weight: 700; }
+
+  /* ---- wire / frame readout ---- */
+  .wire {
+    background: #07080e; border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.7; color: #cdd2ee; min-height: 120px; white-space: pre-wrap;
+  }
+  .w-field { color: var(--warn); } .w-event { color: #c79bff; } .w-data { color: var(--good); }
+  .w-id { color: var(--accent); } .w-dim { color: #5a5f85; }
+
+  /* ---- two clients (leak demo) ---- */
+  .clients { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .client { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .client h4 { font-size: 12px; margin-bottom: 8px; }
+  .bubble { font-size: 12px; padding: 5px 9px; border-radius: 8px; margin: 4px 0; background: #0b0c14; border: 1px solid var(--line); }
+  .bubble.mine { border-color: var(--accent); }
+  .bubble.leak { border-color: var(--bad); color: var(--bad); }
+  .tag-leak { color: var(--bad); font-weight: 700; }
+  .tag-ok { color: var(--good); font-weight: 700; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .step-text .term { color: var(--accent); font-weight: 600; }
+  .step-text .file { color: var(--warn); font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body code { font-size: 11.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  .src { color: #4a4f72; font-size: 11px; margin-top: 6px; text-align: center; }
+  .src a { color: #5a5f85; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } .lane { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">travel-booking-assistant · chat transport</div>
+  <h1>Server mints the id → POST returns 202 → a separate long-lived SSE stream carries the work</h1>
+  <p class="sub">Why the chat is split into two HTTP calls instead of one. We walk the four moves
+  through the real files in this repo, show the raw bytes on the wire, then a senior asks you to
+  change it live: run across replicas, stop one user seeing another's tokens, and survive a dropped
+  connection. Step through one idea at a time.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+
+  <!-- TRANSPORT LANE -->
+  <div id="view-lane">
+    <div class="lane">
+      <div>
+        <div class="col-h">Browser</div>
+        <div class="box" id="b-client"><div class="bt">Chat client</div><div class="bd">useSendMessage · useChatStream</div></div>
+        <div class="arrow" id="a-post">— POST /api/chat —▶</div>
+        <div class="box" id="b-stream-conn"><div class="bt">EventSource</div><div class="bd">one stream, opened once on mount</div></div>
+      </div>
+      <div>
+        <div class="col-h">Server</div>
+        <div class="box" id="b-post"><div class="bt">POST handler</div><div class="bd">mints id · enqueues job · returns 202</div></div>
+        <div class="arrow" id="a-202">◀— 202 { id } —</div>
+        <div class="box" id="b-bus"><div class="bt">Job store / bus</div><div class="bd">jobs.set(id, job) → (prod: Redis pub/sub)</div></div>
+        <div class="arrow" id="a-frames">— event-stream frames —▶</div>
+        <div class="box good" id="b-stream-h"><div class="bt">GET /stream handler</div><div class="bd">long-lived text/event-stream</div></div>
+      </div>
+      <div>
+        <div class="col-h">Live state (client reducer)</div>
+        <div class="box" id="b-state">
+          <div class="bd" style="color:var(--ink)"><span class="mono" id="st-pending">pendingTurnId: —</span></div>
+          <div class="bd" style="color:var(--ink)"><span class="mono" id="st-active">activeTurnId: —</span></div>
+          <div class="bd" style="color:var(--ink)"><span class="mono" id="st-own">ownTurns: { }</span></div>
+          <div class="bubble mine" id="st-msg" style="margin-top:8px; display:none;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-h" style="text-align:left; margin-top:16px;">On the wire (text/event-stream frames)</div>
+    <div class="wire" id="wire"><span class="w-dim">// frames appear here as the stream emits them</span></div>
+  </div>
+
+  <!-- LEAK / FIX VIEW -->
+  <div id="view-leak" style="display:none;">
+    <div class="col-h" style="text-align:left; margin-bottom:10px;">Two users, <span id="leak-mode" class="tag-leak">one global channel</span></div>
+    <div class="clients">
+      <div class="client">
+        <h4>Alice — turn <code>a1</code></h4>
+        <div id="alice-bubbles"></div>
+      </div>
+      <div class="client">
+        <h4>Bob — turn <code>b2</code></h4>
+        <div id="bob-bubbles"></div>
+      </div>
+    </div>
+    <div class="wire" id="leak-wire" style="margin-top:14px;"></div>
+  </div>
+
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-h">★ In the code</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ▶ Play auto-advances</p>
+<p class="src">Live docs cited: MDN
+  <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events">Using server-sent events</a>
+  · <a href="https://developer.mozilla.org/en-US/docs/Web/API/EventSource">EventSource</a></p>
+
+<script>
+/* ── live-state helpers driven by steps ──────────────────────────────────── */
+function setState(o){
+  document.getElementById('st-pending').textContent = 'pendingTurnId: ' + (o.pending ?? '—');
+  document.getElementById('st-active').textContent  = 'activeTurnId: '  + (o.active ?? '—');
+  document.getElementById('st-own').textContent     = 'ownTurns: ' + (o.own ?? '{ }');
+  const msg = document.getElementById('st-msg');
+  if(o.msg){ msg.style.display='block'; msg.textContent = o.msg; }
+  else { msg.style.display='none'; }
+}
+function setWire(html){ document.getElementById('wire').innerHTML = html; }
+const F = {
+  open:  '<span class="w-event">event: open</span>\n<span class="w-field">data:</span> <span class="w-data">{"ok":true}</span>\n',
+  token: (id,c)=>'<span class="w-event">event: token</span>\n<span class="w-field">data:</span> <span class="w-data">{"id":"<span class="w-id">'+id+'</span>","chunk":"'+c+'"}</span>\n',
+  stage: (id)=>'<span class="w-event">event: stage</span>\n<span class="w-field">data:</span> <span class="w-data">{"id":"<span class="w-id">'+id+'</span>","name":"policy","status":"running"}</span>\n',
+  done:  (id)=>'<span class="w-event">event: done</span>\n<span class="w-field">data:</span> <span class="w-data">{"id":"<span class="w-id">'+id+'</span>"}</span>\n',
+  id:    (id)=>'<span class="w-field">id:</span> <span class="w-id">'+id+'-7</span>\n'
+};
+
+/* leak demo renderers */
+function renderLeak(scoped){
+  document.getElementById('leak-mode').className = scoped ? 'tag-ok' : 'tag-leak';
+  document.getElementById('leak-mode').textContent = scoped ? 'per-conversation channel + ownTurns guard' : 'one global channel';
+  const aliceFrames = [['a1','Book'],['a1',' the'],['a1',' 9am']];
+  const bobFrames   = [['b2','Hotel'],['b2',' near'],['b2',' HQ']];
+  const interleaved = [aliceFrames[0],bobFrames[0],aliceFrames[1],bobFrames[1],aliceFrames[2],bobFrames[2]];
+  const aliceOut=[], bobOut=[], wire=[];
+  for(const [id,chunk] of interleaved){
+    wire.push('<span class="w-event">event: token</span> <span class="w-field">data:</span> <span class="w-data">{"id":"<span class="w-id">'+id+'</span>","chunk":"'+chunk+'"}</span>');
+    // Alice's tab: in global mode she renders everything; scoped, only id===a1
+    if(id==='a1' || !scoped) aliceOut.push([id,chunk]);
+    if(id==='b2' || !scoped) bobOut.push([id,chunk]);
+  }
+  const draw = (arr, mine) => arr.map(([id,c])=>{
+    const leaked = id!==mine;
+    const cls = leaked ? 'bubble leak' : 'bubble mine';
+    return '<div class="'+cls+'">'+c+(leaked?' <span class="tag-leak">← '+id+' (not yours)</span>':'')+'</div>';
+  }).join('');
+  document.getElementById('alice-bubbles').innerHTML = draw(aliceOut,'a1');
+  document.getElementById('bob-bubbles').innerHTML   = draw(bobOut,'b2');
+  document.getElementById('leak-wire').innerHTML = wire.join('\n');
+}
+
+function showView(name){
+  document.getElementById('view-lane').style.display = name==='lane' ? 'block':'none';
+  document.getElementById('view-leak').style.display = name==='leak' ? 'block':'none';
+}
+
+/* ════ steps ═════════════════════════════════════════════════════════════ */
+const steps = [
+  {
+    title: "The shape, in one sentence",
+    view: "lane", active: [],
+    state: { pending:null, active:null, own:'{ }' },
+    wire: '<span class="w-dim">// nothing on the wire yet — the stream is open and idle</span>',
+    text: "The chat is two separate HTTP calls, not one. A <b>POST</b> hands the server a request and gets a receipt back instantly. A <span class='term'>second</span>, long-lived connection — opened once, separately — streams the actual work back. The four moves: <b>(1)</b> server mints the id, <b>(2)</b> POST returns <span class='term'>202</span> at once, <b>(3)</b> a decoupled stream carries the work correlated by that id, <b>(4)</b> in production a message bus fans events out to whichever connection is listening.",
+    secondary: "<b>Why not one call?</b> A single POST that streamed its own reply would have to hold the HTTP request open for the whole agent run (seconds to minutes). That couples the send to the receive: a slow reply blocks the composer, a network blip kills both, and the browser can't auto-recover. Splitting them lets each do one job well.",
+    sec: "★ The big idea"
+  },
+  {
+    title: "Move 1 — the server mints the id",
+    view: "lane", active: ["b-post"], tag:{kind:"good",label:"authoritative"},
+    state: { pending:null, active:null, own:'{ }', msg:'"Book the 9am to Leeds"' },
+    wire: '<span class="w-dim">// POST in flight — no stream frames yet</span>',
+    text: "A <span class='term'>turn</span> (one user-request + the agent's reply to it) needs an identity so every later event can be tied back to it. The <b>server</b> creates that id, not the client. In the mock, <span class='file'>app/api/chat/route.ts:18</span> does <code>crypto.randomUUID()</code> and stores the job under it. Server-minted means the id is <b>authoritative work identity</b> — the client can't forge one to read another tenant's turn, and the server's records (audit, outbox) key off the same value.",
+    secondary: "<span class='file'>useSendMessage.ts:11</span> documents the contract in the prop name: <code>onTurnAccepted(turnId)</code> — \"Called with the <b>server-minted</b> turn id once 202 returns.\" The client optimistically renders the user's bubble (<code>onUserMessage</code>, line 33) <i>before</i> it even has the id, then learns the id from the response.",
+    sec: "★ In the code"
+  },
+  {
+    title: "Move 2 — POST returns 202 and lets go",
+    view: "lane", active: ["b-post","a-202","b-client"], tag:{kind:"good",label:"non-blocking"},
+    state: { pending:'a1f3…', active:null, own:'{ a1f3… }', msg:'"Book the 9am to Leeds"' },
+    wire: '<span class="w-dim">// 202 received. The stream (open since mount) will carry the work.</span>',
+    text: "<span class='term'>202 Accepted</span> is an HTTP status meaning \"I've taken your request and will work on it — but it isn't finished.\" It is the honest code here: the work hasn't happened. <span class='file'>route.ts:21</span> returns <code>{ id }</code> with <code>status: 202</code> and the handler <b>ends immediately</b>. It does <i>no</i> work and does <b>not</b> hold the stream open. The POST's only job is to register the turn and report its id.",
+    secondary: "<span class='file'>useSendMessage.ts:36-40</span>: <code>const { id } = await postChatMessage(...)</code> then <code>onTurnAccepted(id)</code>. The composer locks (<code>isSending</code>) only for this round-trip — milliseconds — then unlocks in <code>finally</code> (line 46). The user can type the next message while the agent is still thinking.",
+    sec: "★ In the code"
+  },
+  {
+    title: "begin_turn — the id is registered locally",
+    view: "lane", active: ["b-client","b-state"],
+    state: { pending:'a1f3…', active:'a1f3…', own:'{ a1f3… }', msg:'"Book the 9am to Leeds"' },
+    wire: '<span class="w-dim">// waiting for the first frame tagged a1f3…</span>',
+    text: "Receiving the 202 triggers <code>beginTurn(turnId)</code>. Two things happen in <span class='file'>useChatStream.ts:185-188</span>: the id is added to <code>ownTurns</code> (a <code>useRef&lt;Set&gt;</code>, line 151) and the reducer resets the work surfaces for the new turn. <code>ownTurns</code> is the <span class='term'>correlation guard</span> — the set of turn ids <i>this</i> browser tab started, so it can ignore stream frames meant for anyone else.",
+    secondary: "Reducer <code>begin_turn</code> (lines 58-66) sets <code>pendingTurnId</code> and <code>activeTurnId</code> to the new id and clears the old <code>stages</code> / <code>itinerary</code>. <code>pendingTurnId</code> = \"POST done, stream hasn't spoken yet\"; it flips to <code>null</code> the instant the first frame for that id arrives.",
+    sec: "★ Live state"
+  },
+  {
+    title: "Move 3 — the decoupled stream carries the work",
+    view: "lane", active: ["b-stream-conn","a-frames","b-stream-h"], tag:{kind:"good",label:"long-lived"},
+    state: { pending:'a1f3…', active:'a1f3…', own:'{ a1f3… }' },
+    wire: F.open + '<span class="w-dim">// connection held open, idle…</span>',
+    text: "<span class='term'>SSE (Server-Sent Events)</span> is a browser standard for a server to push a one-way stream of text events over a single long-lived HTTP response. The browser side is <span class='term'>EventSource</span>, opened once on mount in <span class='file'>sse-client.ts:20</span> — <code>new EventSource(apiUrl('/api/chat/stream'))</code>. This connection is <b>not</b> tied to any one POST; it was opened before the message was even typed and stays open across many turns.",
+    secondary: "Per MDN, EventSource keeps a <b>persistent connection</b> in <code>text/event-stream</code> format and is <b>unidirectional</b> (server→client only). <span class='file'>useChatStream.ts:173-176</span> opens it in a <code>useEffect</code> on mount and returns <code>close</code> for cleanup — one stream for the component's whole life.",
+    sec: "★ MDN: EventSource"
+  },
+  {
+    title: "Under the hood — what crosses the wire",
+    view: "lane", active: ["a-frames","b-stream-h"],
+    state: { pending:null, active:'a1f3…', own:'{ a1f3… }' },
+    wire: F.token('a1f3…','Booking') + '\n' + F.token('a1f3…',' the') + '\n' + F.stage('a1f3…') + '\n' + F.done('a1f3…'),
+    text: "Each SSE message is plain text fields, one per line, terminated by a <b>blank line</b> (two newlines). The server writes them in <span class='file'>stream/route.ts:16</span>: <code>event: ${event}\\ndata: ${JSON}\\n\\n</code>. MDN's three fields: <code>event:</code> names the event type, <code>data:</code> is the payload, and a blank line ends the message. Crucially, <b>every</b> <code>data</code> object carries <code>\"id\"</code> — that's the correlation id stamped on the wire so the client can route the frame to the right turn.",
+    secondary: "<span class='file'>stream/route.ts:57</span>: <code>send(\"token\", { id, chunk })</code>. On the client, <span class='file'>sse-client.ts:31</span> registers a listener per named event (<code>token</code>, <code>stage</code>, <code>itinerary</code>, <code>done</code>) via <code>addEventListener(name, …)</code> — MDN's mechanism for <b>named</b> SSE events, vs the default <code>onmessage</code>.",
+    sec: "★ On the wire"
+  },
+  {
+    title: "Correlate by id — ignore frames that aren't yours",
+    view: "lane", active: ["b-stream-conn","b-state"], tag:{kind:"good",label:"the guard"},
+    state: { pending:null, active:'a1f3…', own:'{ a1f3… }' },
+    wire: F.token('a1f3…','Booking') + '<span class="w-dim">  ← id in ownTurns → dispatch</span>\n\n' + F.token('zzz9…','(other tab)') + '<span class="w-dim">  ← not in ownTurns → drop</span>',
+    text: "The one stream may deliver frames for turns this tab never started (it's a shared connection). <span class='file'>useChatStream.ts:154-155</span> is the gate: <code>const id = data?.id; if (!id || !ownTurns.current.has(id)) return;</code>. No id, or an id this tab didn't start → <b>drop the frame</b>. Only frames whose id is in <code>ownTurns</code> reach the reducer, which appends tokens to the matching message by id (lines 68-94).",
+    secondary: "This is <span class='term'>idempotency-adjacent correlation</span>: the id lets the client re-apply or render the same logical event without confusing two turns. Append-by-id (line 70: <code>find(m =&gt; m.id === id)</code>) means a duplicate token frame updates the <i>same</i> message rather than spawning a second one.",
+    sec: "★ In the code"
+  },
+  {
+    title: "Move 4 — fan-out (the production target)",
+    view: "lane", active: ["b-bus","b-stream-h"], tag:{kind:"good",label:"DESIGN.md"},
+    state: { pending:null, active:'a1f3…', own:'{ a1f3… }' },
+    wire: '<span class="w-dim">// mock: stream polls jobs.set() in memory (stream/route.ts:82)\n// prod: worker → Redis PUBLISH turn:a1f3 → stream SUBSCRIBE relays frames</span>',
+    text: "In the mock, POST and stream share one process, so POST just does <code>jobs.set(id, job)</code> (<span class='file'>chat/route.ts:19</span>) and the stream polls that in-memory map (<span class='file'>stream/route.ts:82</span>). The real app can't: the work runs in a <b>separate worker</b> and there may be many stream connections on different servers. <span class='term'>pub/sub (publish/subscribe)</span> bridges them — the worker <code>PUBLISH</code>es each event to a channel keyed by the turn, every stream <code>SUBSCRIBE</code>s, and whichever one holds that user's connection relays it.",
+    secondary: "DESIGN.md locks <b>Redis + BullMQ</b> for \"jobs, booking-saga dispatch\" and <b>SSE</b> for \"live token streaming to the UI.\" The same <code>id</code> is the join key end to end: the outbox row's <code>plan_id</code>, the BullMQ job, the Redis channel, and the SSE frame's <code>data.id</code> are all the same identity.",
+    sec: "★ DESIGN.md"
+  },
+  {
+    title: "Your prior app vs this one",
+    view: "lane", active: [],
+    state: { pending:null, active:null, own:'{ }' },
+    wire: '<span class="w-dim">PRIOR:  POST /messages → 202 {id}; GET /messages/stream → sub.subscribe(CHANNEL)\nNOW:    same skeleton + per-turn ownTurns guard + per-conversation channel (prod)</span>',
+    text: "Your earlier app already had the skeleton: <code>POST /messages</code> minted an <code>assistantId</code>, returned <code>202 {id}</code>, and <code>enqueueReply</code>; <code>GET /messages/stream</code> subscribed to <b>one global CHANNEL</b> and relayed <code>event: token {id, chunk}</code> / <code>event: done</code>. This app keeps that exact shape and tightens two things: a client-side <code>ownTurns</code> correlation guard, and (in prod) a channel <b>scoped per conversation/tenant</b> instead of one global one. The next steps show why that scoping isn't optional here.",
+    secondary: "The prior single global channel works for a one-user toy. The moment two tenants share the relay, a global channel sends Bob's tokens down Alice's stream. This codebase is multi-tenant public-sector (DESIGN.md: \"per-client access scoping\" is a <b>requirement, not polish</b>), so the channel must carry the scope.",
+    sec: "★ Evolution"
+  },
+  {
+    title: "Why SSE, not WebSocket or long-polling",
+    view: "lane", active: ["b-stream-conn"],
+    state: { pending:null, active:null, own:'{ }' },
+    wire: '<span class="w-dim">SSE:         one-way, plain HTTP, auto-reconnect, text/event-stream\nWebSocket:   two-way, own protocol, you build reconnect/replay yourself\nlong-poll:   request-per-update, high overhead, no real stream</span>',
+    text: "The reply is <b>server→client only</b> — tokens, stage updates, the itinerary. That's exactly SSE's shape. <span class='term'>WebSocket</span> (a two-way persistent socket on its own protocol) buys bidirectional messaging we don't need and costs you hand-rolled reconnection and message framing. <span class='term'>Long-polling</span> (repeatedly POST/GET, each returning one update then closing) wastes a full request per update and isn't a real stream. SSE rides plain HTTP, so proxies, auth cookies and HTTP/2 multiplexing all just work — and <b>the browser reconnects for you</b>.",
+    secondary: "MDN trade-off table: EventSource is unidirectional over HTTP; WebSocket is bidirectional on the WebSocket protocol. One caveat MDN flags: over HTTP/1.1 a browser caps SSE connections at <b>6 per domain</b> across tabs; HTTP/2 lifts that (≈100). One stream per tab keeps you well under it.",
+    sec: "★ MDN trade-offs"
+  },
+  {
+    title: "Senior asks: run this across N replicas",
+    view: "lane", active: ["b-bus","b-stream-h","b-post"], tag:{kind:"good",label:"live change"},
+    state: { pending:null, active:null, own:'{ }' },
+    wire: '<span class="w-dim">user POSTs to replica-2  →  worker PUBLISH turn:a1f3 (Redis)\nuser STREAM held on replica-5  →  SUBSCRIBE turn:a1f3  →  relays\n(POST and stream landed on different boxes — that\'s fine)</span>',
+    text: "<b>The reasoning:</b> with multiple server replicas behind a load balancer, the POST and the long-lived stream can land on <b>different boxes</b>, and the worker doing the run is a third. In-memory <code>jobs.set()</code> only works because the mock is one process. The fix is a shared bus: the worker <code>PUBLISH</code>es to Redis keyed by the turn id; <b>every</b> replica's stream <code>SUBSCRIBE</code>s and relays only what its connected clients own. <b>Why not sticky sessions</b> (pin a user to one replica)? They'd force POST+stream onto the same box but break the instant that box restarts or the worker lives elsewhere. A <b>stateless relay</b> over pub/sub is what scales — and the server-minted <code>id</code> is what makes it possible, since it's the routing key that's identical on every box.",
+    secondary: "This is the seam the mock is faking. <span class='file'>stream/route.ts:80-97</span> polls an in-process map; swap that loop for a Redis <code>SUBSCRIBE</code> and nothing else in the contract changes — the wire frames and the client's <code>ownTurns</code> guard are untouched. <b>The id carries across the whole hop unchanged.</b>",
+    sec: "★ Work the change"
+  },
+  {
+    title: "Senior asks: two users see each other's tokens",
+    view: "leak", leak:false, tag:{kind:"bad",label:"the bug"},
+    text: "<b>Reproduce it:</b> Alice's turn is <code>a1</code>, Bob's is <code>b2</code>. With <b>one global channel</b>, the worker publishes every token to the same place, so each stream relays <i>both</i> turns to <i>both</i> tabs. Alice's tab receives Bob's <code>b2</code> frames. The client guard catches some of it — but a global channel still ships Bob's data over the network into Alice's browser, which for public-sector data is a leak regardless of what the UI renders. <b>The diagnosis:</b> the channel is the wrong granularity.",
+    secondary: "Notice the red bubbles: in global mode each tab renders the other user's tokens. The bug isn't the client — it's that the transport broadcast to everyone. You can't fix a data-isolation problem purely in the browser.",
+    sec: "★ Gotcha"
+  },
+  {
+    title: "…fix it: scope the channel + the guard",
+    view: "leak", leak:true, tag:{kind:"good",label:"the fix"},
+    text: "<b>The fix has two layers.</b> (1) <b>Server</b>: scope the pub/sub channel <i>per conversation/tenant</i> — <code>turn:{tenantId}:{conversationId}</code> — so a stream only ever subscribes to channels its viewer is entitled to. Bob's frames never enter Alice's network connection. (2) <b>Client</b>: the <code>ownTurns</code> guard (<span class='file'>useChatStream.ts:155</span>) stays as defense-in-depth, dropping any stray frame by id. Server scoping is the real boundary; the client guard is the seatbelt. This ties straight to DESIGN.md's <b>per-client access scoping</b> requirement.",
+    secondary: "<b>Layered isolation:</b> the entitlement check decides which channels a stream may <code>SUBSCRIBE</code> to (authorization at the transport), and <code>ownTurns</code> filters by turn id (correlation at the client). Same defense the policy layer uses elsewhere: scope at the source, verify again at the edge.",
+    sec: "★ The fix"
+  },
+  {
+    title: "Senior asks: make a dropped stream resume",
+    view: "lane", active: ["b-stream-conn","a-frames"], tag:{kind:"good",label:"live change"},
+    state: { pending:null, active:'a1f3…', own:'{ a1f3… }' },
+    wire: F.id('a1f3…') + F.token('a1f3…',' Leeds') + '\n<span class="w-dim">— drop —</span>\n<span class="w-field">GET /stream</span>  <span class="w-id">Last-Event-ID: a1f3…-7</span>  <span class="w-dim">← browser auto-sends</span>',
+    text: "<b>The reasoning:</b> EventSource already auto-reconnects on a transient drop (MDN: \"if the connection closes, it is restarted\"). What it doesn't do for free is <b>not lose the frames sent while disconnected</b>. Three pieces close that gap: (1) the server adds an <code>id:</code> field to each frame (MDN: sets the stream's last-event-id); (2) on reconnect the browser <b>automatically</b> sends <code>Last-Event-ID</code> with the last id it saw; (3) the server replays buffered events after that id from a short Redis buffer. Because rendering is <b>append-by-id</b> (idempotent), replaying a frame the client already applied is harmless — it lands on the same message.",
+    secondary: "The mock doesn't emit <code>id:</code> yet (<span class='file'>stream/route.ts:15</span> writes only <code>event</code>/<code>data</code>). To add resume: emit a monotonic <code>id:</code> per turn, read <code>req.headers.get('last-event-id')</code> on a new GET, and replay from the buffer. The <code>retry:</code> field (MDN) lets the server tune reconnect delay.",
+    sec: "★ MDN: reconnection"
+  },
+  {
+    title: "Extend it safely — a NEW event type end to end",
+    view: "lane", active: ["b-stream-h","a-frames","b-state"], tag:{kind:"good",label:"checklist"},
+    state: { pending:null, active:'a1f3…', own:'{ a1f3… }' },
+    wire: '<span class="w-event">event: citation</span>\n<span class="w-field">data:</span> <span class="w-data">{"id":"<span class="w-id">a1f3…</span>","ruleId":"hotel_cap_band8","quote":"…"}</span>',
+    text: "Say the agent should stream policy <b>citations</b> live. Trace it through the transport, one layer at a time: <b>(1) Server emits</b> — add a <code>case</code> in <span class='file'>stream/route.ts</span> that <code>send(\"citation\", { id, … })</code>, always stamping the turn <code>id</code>. <b>(2) On the wire</b> — a new <code>event: citation</code> frame, same blank-line framing. <b>(3) Client correlates</b> — add <code>\"citation\"</code> to <code>SseEventName</code> (<span class='file'>sse-client.ts:4</span>) and to the <code>names</code> array (line 22) so a listener is registered. <b>(4) Reducer</b> — add a <code>citation</code> action and case (<span class='file'>useChatStream.ts:39</span>) that merges by id.",
+    secondary: "<b>Checklist to not break correlation:</b> (a) every new frame carries <code>id</code> — no id, the guard drops it; (b) register the event name on the client or <code>addEventListener</code> never fires; (c) extend both the union type <i>and</i> the reducer switch (TypeScript's exhaustiveness flags the gap); (d) merge state <b>by id</b>, never by array position.",
+    sec: "★ Extend it"
+  },
+  {
+    title: "Where this breaks down",
+    view: "lane", active: [],
+    state: { pending:null, active:null, own:'{ }' },
+    wire: '<span class="w-dim">SSE/pub-sub is wrong for:\n  • true two-way chat per frame   → WebSocket\n  • millions of fan-out subscribers → dedicated push (CDN/SSE gateway)\n  • strict global ordering/delivery → a log (Kafka) + offsets, not fire-and-forget pub/sub</span>',
+    text: "This transport is right for <b>one-way, per-user, best-effort streaming</b> of an agent run. It's the <b>wrong</b> tool when: you need <b>bidirectional</b> low-latency frames (collab cursors, voice) → reach for WebSocket; you need <b>massive fan-out</b> of one event to huge audiences → a push/CDN gateway, not a relay per connection; or you need <b>strict ordering and guaranteed delivery</b> → Redis pub/sub is fire-and-forget (a subscriber that's down misses messages), so use a durable log (Kafka/streams) with offsets and replay. Knowing the boundary is the senior move: the four-move pattern earns its keep precisely because the chat reply is one-way, per-turn, and tolerant of an occasional re-render.",
+    secondary: "Recap of the four moves and the one problem each solves — mint id: <b>authoritative identity</b>; 202: <b>decouple send from a long reply</b>; separate SSE stream: <b>browser-managed, reconnecting transport</b>; pub/sub fan-out: <b>deliver across replicas and workers</b>. The server-minted id is the thread stitching all four together.",
+    sec: "★ Know the edge"
+  }
+];
+
+/* ── per-step render ─────────────────────────────────────────────────────── */
+function renderStage(step){
+  showView(step.view);
+  if(step.view === 'lane'){
+    if(step.state) setState(step.state); else setState({});
+    setWire(step.wire || '');
+  } else if(step.view === 'leak'){
+    renderLeak(!!step.leak);
+  }
+}
+
+/* ── stepper engine — unchanged ──────────────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? (s.tag.kind === "good" ? "good" : "bad") : "";
+  document.querySelectorAll(".node, .box, .arrow").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    if(el.classList.contains("box")){
+      el.classList.toggle("bad", on && branch === "bad" && !el.classList.contains("good"));
+    }
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("sec-h").textContent = s.sec || "★ In the code";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

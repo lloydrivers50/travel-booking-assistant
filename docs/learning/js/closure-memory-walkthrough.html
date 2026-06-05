@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How a Closure Keeps a Variable Alive</title>
+<style>
+  :root{
+    --bg:#000000; --panel:#0c0e12; --panel-2:#11141a; --line:#23262f;
+    --ink:#eef0f4; --dim:#8b9099; --faint:#565b66;
+    --blue:#4d8dff; --blue-glow:#2563eb;
+    --green:#35d6a4; --green-glow:#0f8f6a;
+    --red:#f25c4c; --red-glow:#b3261e;
+    --amber:#f6b657;
+    --r:16px;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+    --mono:"SF Mono","JetBrains Mono",Menlo,Consolas,ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--bg);color:var(--ink);}
+  body{font:15px/1.6 var(--sans);max-width:1240px;margin:0 auto;padding:26px 22px 60px;}
+
+  /* ---------- header / controls ---------- */
+  .eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--blue);font-weight:700;}
+  .controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0 14px;}
+  button{font:inherit;font-weight:600;cursor:pointer;color:var(--ink);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:11px;padding:9px 16px;transition:background .15s,transform .05s,border-color .15s;}
+  button:hover:not(:disabled){background:#1a1e26;border-color:#333845;}
+  button:active{transform:translateY(1px);}
+  button:disabled{opacity:.35;cursor:default;}
+  button.primary{background:linear-gradient(120deg,var(--blue-glow),#6d4dff);border-color:transparent;
+    box-shadow:0 8px 26px -12px var(--blue-glow);}
+  .counter{color:var(--dim);font-variant-numeric:tabular-nums;font-size:13px;}
+  .dots{display:flex;gap:7px;margin-left:auto;}
+  .dot{width:9px;height:9px;border-radius:50%;background:#262a33;cursor:pointer;transition:.25s;}
+  .dot.done{background:#3a4150;}
+  .dot.active{background:var(--blue);transform:scale(1.4);box-shadow:0 0 12px var(--blue);}
+
+  /* ---------- big animated step title ---------- */
+  .step-title{font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-.01em;margin:6px 0 18px;
+    min-height:38px;opacity:0;transform:translateY(10px);}
+  .step-title.in{opacity:1;transform:none;transition:opacity .5s ease,transform .5s ease;}
+  .step-title .pill{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.04em;
+    text-transform:uppercase;vertical-align:middle;margin-left:12px;padding:3px 9px;border-radius:999px;border:1px solid;}
+  .pill.blue{color:var(--blue);border-color:var(--blue);}
+  .pill.green{color:var(--green);border-color:var(--green);}
+  .pill.red{color:var(--red);border-color:var(--red);}
+  .pill.amber{color:var(--amber);border-color:var(--amber);}
+
+  /* ---------- stage ---------- */
+  .stage{position:relative;background:radial-gradient(120% 120% at 50% 0%,#0a0c10 0%,#000 70%);
+    border:1px solid var(--line);border-radius:var(--r);padding:22px;overflow:hidden;}
+  .lanes{display:grid;grid-template-columns:1fr 1.25fr;gap:30px;min-height:380px;}
+  .lane-head{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--faint);font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+  .lane-head::before{content:"";width:7px;height:7px;border-radius:2px;background:currentColor;}
+
+  /* stack grows upward: newest on top */
+  .stack{display:flex;flex-direction:column-reverse;gap:12px;justify-content:flex-start;}
+  .heap{position:relative;display:flex;flex-direction:column;gap:18px;}
+
+  /* a memory box (frame or heap record) */
+  .box{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:13px;
+    padding:13px 15px;transition:opacity .45s,transform .45s,border-color .45s,box-shadow .45s,filter .45s;}
+  .box.hidden{opacity:0;transform:translateY(14px) scale(.96);pointer-events:none;height:0;padding:0;border:0;margin:0;overflow:hidden;}
+  .box .b-tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--dim);
+    text-transform:uppercase;margin-bottom:9px;display:flex;justify-content:space-between;}
+  .box .b-name{font-family:var(--mono);font-size:13.5px;font-weight:700;color:var(--ink);}
+  .box.active{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue),0 14px 40px -16px var(--blue-glow);}
+  .box.alive{border-color:var(--green);box-shadow:0 0 0 1px var(--green-glow),0 14px 44px -16px var(--green-glow);}
+  .box.alive .b-tag::after{content:"alive";color:var(--green);font-weight:700;}
+  .box.dead{border-color:var(--red);box-shadow:0 0 0 1px var(--red),0 0 38px -8px var(--red-glow);
+    animation:shake .4s ease 1;}
+  .box.collected{opacity:0;transform:scale(.85) translateX(20px);filter:blur(2px);}
+  @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+
+  /* bindings inside a box */
+  .binds{display:flex;flex-direction:column;gap:7px;}
+  .bind{font-family:var(--mono);font-size:12.5px;display:flex;align-items:center;gap:7px;
+    background:#06070a;border:1px solid var(--line);border-left:3px solid var(--bc,var(--line));
+    border-radius:7px;padding:5px 10px;}
+  .bind .k{color:var(--dim);} .bind .v{color:#fff;font-weight:700;margin-left:auto;}
+  .bind .v.null{color:var(--red);} .bind .v.fn{color:var(--blue);}
+
+  /* the [[Environment]] slot row, anchor for the arrow */
+  .slot{margin-top:9px;font-family:var(--mono);font-size:12px;display:flex;align-items:center;gap:8px;
+    color:var(--amber);background:rgba(246,182,87,.07);border:1px dashed rgba(246,182,87,.4);
+    border-radius:7px;padding:5px 10px;}
+
+  /* svg overlay for arrows + packet */
+  #wires{position:absolute;inset:0;pointer-events:none;z-index:5;}
+  .wire{fill:none;stroke-linecap:round;}
+  .wire.env{stroke:var(--amber);stroke-width:2.2;filter:drop-shadow(0 0 6px rgba(246,182,87,.55));}
+  .wire.hold{stroke:var(--blue);stroke-width:2;stroke-dasharray:2 6;opacity:.7;}
+  .wire.broken{stroke:var(--faint);opacity:.35;stroke-dasharray:3 7;filter:none;}
+  .arrowhead{fill:var(--amber);}
+  #packet{position:absolute;width:13px;height:13px;border-radius:50%;background:var(--blue);
+    box-shadow:0 0 14px 4px var(--blue);z-index:6;opacity:0;transition:left 1.05s cubic-bezier(.5,0,.2,1),top 1.05s cubic-bezier(.5,0,.2,1),opacity .3s;}
+
+  .gc-bar{display:flex;align-items:center;gap:12px;margin-top:18px;min-height:20px;}
+  .gc-bar .lbl{font-size:13px;color:var(--dim);}
+  .verdict{font-family:var(--mono);font-size:12.5px;font-weight:700;opacity:0;transition:opacity .4s;}
+  .verdict.show{opacity:1;}
+  .verdict.dead{color:var(--red);} .verdict.live{color:var(--green);}
+
+  /* console output line (step 4) */
+  .console{margin-top:16px;font-family:var(--mono);font-size:13px;color:var(--green);
+    background:#06070a;border:1px solid var(--line);border-radius:9px;padding:9px 13px;
+    opacity:0;transform:translateY(6px);transition:.4s;}
+  .console.show{opacity:1;transform:none;}
+  .console .pre{color:var(--faint);}
+
+  /* ---------- code + info cards ---------- */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;}
+  .card h3{font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:11px;font-weight:700;}
+  .card.explain h3{color:var(--blue);} .card.key h3{color:var(--green);}
+  .card p{color:var(--ink);font-size:14px;} .card p b{color:#fff;} .card p i{color:var(--amber);font-style:normal;}
+  code{font-family:var(--mono);font-size:12px;background:#06070a;border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px;color:#cdd5e6;}
+
+  .code-panel{background:#06070a;border:1px solid var(--line);border-radius:var(--r);padding:14px 4px;margin-top:18px;}
+  .cl{display:flex;font-family:var(--mono);font-size:13px;line-height:1.95;white-space:pre;
+    border-left:3px solid transparent;opacity:.4;transition:.25s;}
+  .cl .ln{width:34px;text-align:right;padding-right:14px;color:#3a3f4a;user-select:none;flex:none;}
+  .cl.hot{opacity:1;background:rgba(77,141,255,.09);border-left-color:var(--blue);}
+  .k-kw{color:#c79bff;} .k-str{color:var(--green);} .k-fn{color:var(--blue);} .k-com{color:#4d5360;font-style:italic;}
+
+  .hint{text-align:center;color:var(--faint);font-size:12px;margin-top:18px;}
+  @media(max-width:860px){.lanes{grid-template-columns:1fr;}.grid{grid-template-columns:1fr;}#wires{display:none;}}
+</style>
+</head>
+<body>
+
+<div class="eyebrow">JavaScript memory · closures</div>
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="next" class="primary">Next ›</button>
+  <span class="counter"><span id="cur">1</span> / <span id="total">7</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="step-title" id="title"></div>
+
+<div class="stage" id="stage">
+  <svg id="wires">
+    <defs>
+      <marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+        <path class="arrowhead" d="M0,0 L7,3 L0,6 Z"/>
+      </marker>
+    </defs>
+    <path id="wire-hold" class="wire hold"></path>
+    <path id="wire-env"  class="wire env" marker-end="url(#ah)"></path>
+  </svg>
+  <div id="packet"></div>
+
+  <div class="lanes">
+    <!-- CALL STACK -->
+    <div>
+      <div class="lane-head" style="color:var(--blue)">Call stack &nbsp;·&nbsp; runs &amp; vanishes</div>
+      <div class="stack" id="stack">
+        <div class="box" id="f-global">
+          <div class="b-tag"><span>frame · Global</span></div>
+          <div class="binds">
+            <div class="bind" style="--bc:var(--blue)"><span class="k">makeGreeter</span><span class="v fn">ƒ</span></div>
+            <div class="bind" style="--bc:var(--green)"><span class="k">greetSam</span><span class="v" id="greetVal">undefined</span></div>
+          </div>
+        </div>
+        <div class="box hidden" id="f-make">
+          <div class="b-tag"><span>frame · makeGreeter("Sam")</span></div>
+          <div class="binds">
+            <div class="bind" style="--bc:var(--amber)"><span class="k">name</span><span class="v">"Sam"</span></div>
+          </div>
+        </div>
+        <div class="box hidden" id="f-greet">
+          <div class="b-tag"><span>frame · greetSam()</span></div>
+          <div class="binds">
+            <div class="bind"><span class="k">name?</span><span class="v" style="color:var(--amber)">look outward →</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HEAP -->
+    <div>
+      <div class="lane-head" style="color:var(--green)">Heap &nbsp;·&nbsp; lives until nothing points at it</div>
+      <div class="heap" id="heap">
+        <div class="box hidden" id="h-fn">
+          <div class="b-tag"><span>function object</span></div>
+          <div class="b-name">ƒ () =&gt; "Hi " + name</div>
+          <div class="slot" id="slot-env">[[Environment]] &nbsp;→</div>
+        </div>
+        <div class="box hidden" id="h-env">
+          <div class="b-tag"><span>environment record · makeGreeter scope</span></div>
+          <div class="binds">
+            <div class="bind" style="--bc:var(--amber)"><span class="k">name</span><span class="v">"Sam"</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="console" id="console"><span class="pre">console ›</span> Hi Sam</div>
+
+  <div class="gc-bar" id="gcbar">
+    <button id="gc-btn">▶ Run: <code style="background:none;border:none;padding:0;color:var(--blue)">greetSam = null</code></button>
+    <span class="lbl">drop the last link and watch the garbage collector</span>
+    <span class="verdict" id="verdict"></span>
+  </div>
+</div>
+
+<div class="code-panel" id="code"></div>
+
+<div class="grid">
+  <div class="card explain"><h3>What's happening</h3><p id="explain"></p></div>
+  <div class="card key"><h3 id="keyHead">★ The one idea</h3><p id="key"></p></div>
+</div>
+
+<p class="hint">← / → arrow keys to step · the heap box stays lit only while something still points at it</p>
+
+<script>
+/* ── tiny syntax highlighter for the code panel ───────────────────────── */
+const KW=new Set(["function","return","const","let","var","null"]);
+const FN=new Set(["console","log","makeGreeter","greetSam"]);
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function hl(line){
+  const re=/(\/\/.*$)|("(?:[^"\\]|\\.)*")|([A-Za-z_$][\w$]*)|([\s\S])/g;let o="",m;
+  while((m=re.exec(line))){
+    if(m[1])o+='<span class="k-com">'+esc(m[1])+'</span>';
+    else if(m[2])o+='<span class="k-str">'+esc(m[2])+'</span>';
+    else if(m[3])o+=KW.has(m[3])?'<span class="k-kw">'+m[3]+'</span>':FN.has(m[3])?'<span class="k-fn">'+m[3]+'</span>':esc(m[3]);
+    else o+=esc(m[4]);
+  } return o||" ";
+}
+const CODE=
+`function makeGreeter(name) {
+  return function () {
+    return "Hi " + name;
+  };
+}
+
+const greetSam = makeGreeter("Sam");
+greetSam();   // "Hi Sam"`;
+document.getElementById("code").innerHTML=CODE.split("\n").map((l,i)=>
+  '<div class="cl" data-ln="'+(i+1)+'"><span class="ln">'+(i+1)+'</span><span>'+hl(l)+'</span></div>').join("");
+
+/* ── the 7 steps ──────────────────────────────────────────────────────── */
+const S=[
+{ // 0
+  title:'The program, frozen before it runs', pill:null,
+  hot:[1,7],
+  greet:'undefined', fGlobal:'',fMake:'hidden',fGreet:'hidden',
+  hFn:'hidden',hEnv:'hidden', envArrow:false,holdArrow:false,
+  console:false, gc:'off',
+  explain:'Two names exist so far. <code>makeGreeter</code> is a function, ready to be called. <code>greetSam</code> is declared but still <b>undefined</b> — line 7 hasn\'t run yet. The heap on the right is empty: nothing has been created.',
+  keyHead:'★ Two places memory lives',
+  key:'The <b>call stack</b> (left) holds the function call you\'re currently inside — it\'s scratch space that disappears the moment the call returns. The <b>heap</b> (right) holds things that need to outlive a single call. Watch which side survives.'
+},
+{ // 1
+  title:'Call <span style="color:var(--blue)">makeGreeter("Sam")</span>', pill:{c:'blue',t:'push frame'},
+  hot:[7,1],
+  greet:'undefined', fMake:'active',fGreet:'hidden',
+  hFn:'hidden',hEnv:'alive', envArrow:false,holdArrow:false,
+  console:false, gc:'off',
+  explain:'Calling a function pushes a new <b>frame</b> onto the stack — a fresh box of local variables. The parameter <code>name</code> is bound to <b>"Sam"</b>. Those locals live in an <b>environment record</b> (right): think of it as this call\'s private bag of variables.',
+  keyHead:'★ Term: environment record',
+  key:'An <i>environment record</i> is just "the box of variables that exist inside one function call." Normally it\'s thrown away when the call returns. The whole closure story is about <b>why this one won\'t be.</b>'
+},
+{ // 2
+  title:'The inner function is born', pill:{c:'amber',t:'capture'},
+  hot:[2,3],
+  greet:'undefined', fMake:'active',fGreet:'hidden',
+  hFn:'alive',hEnv:'alive', envArrow:true,holdArrow:false,
+  console:false, gc:'off',
+  explain:'<code>makeGreeter</code> builds the inner function and is about to return it. At the moment a function is <b>created</b>, JS stamps it with a hidden link called <code>[[Environment]]</code> pointing at the record it was born in. Follow the amber arrow: this function now <i>remembers</i> the box that holds <code>name</code>.',
+  keyHead:'★ This arrow is the closure',
+  key:'A <b>closure</b> = a function + its <code>[[Environment]]</code> link to where it was created. The function didn\'t copy "Sam" — it kept a <i>live wire</i> to the box that holds it.'
+},
+{ // 3
+  title:'makeGreeter returns — its frame dies, the record lives', pill:{c:'green',t:'pop frame'},
+  hot:[7],
+  greet:'ƒ', fMake:'hidden',fGreet:'hidden',
+  hFn:'alive',hEnv:'alive', envArrow:true,holdArrow:true,
+  console:false, gc:'off',
+  explain:'<code>makeGreeter</code> finished, so its <b>stack frame is gone</b> (vanished from the left). Normally its variables would die with it. But they don\'t: <code>greetSam</code> now holds the function (blue link), and that function\'s <code>[[Environment]]</code> still points at the record (amber link). Two live links reach the green box — so JS keeps it.',
+  keyHead:'★ The payoff, in one line',
+  key:'The stack frame and the heap record are <b>not</b> the same thing. The frame is scratch space that pops; the record survives <b>exactly as long as some link can still reach it.</b> That surviving record is what makes <code>name</code> still available later.'
+},
+{ // 4
+  title:'Call <span style="color:var(--green)">greetSam()</span> — follow the wire to find name', pill:{c:'blue',t:'look up'},
+  hot:[8,3],
+  greet:'ƒ', fMake:'hidden',fGreet:'active',
+  hFn:'alive',hEnv:'alive', envArrow:true,holdArrow:true,
+  console:true, gc:'off', packet:true,
+  explain:'Now <code>greetSam()</code> runs and needs <code>name</code>. It isn\'t in this frame — so JS walks the <code>[[Environment]]</code> link outward to the surviving record and finds <b>"Sam"</b> (watch the packet travel). Result: <code>"Hi Sam"</code>. It never stored the string — it <i>read the variable on demand</i> through the live link.',
+  keyHead:'★ Read at call time, not creation time',
+  key:'If you\'d changed <code>name</code> after creating the function, this lookup would see the <b>new</b> value — because the closure points at the variable, not a frozen copy of it. Live wire, every time.'
+},
+{ // 5
+  title:'What keeps it alive? Cut the link and find out', pill:{c:'red',t:'garbage collect'},
+  hot:[],
+  greet:'ƒ', fMake:'hidden',fGreet:'hidden',
+  hFn:'alive',hEnv:'alive', envArrow:true,holdArrow:true,
+  console:false, gc:'armed',
+  explain:'You already know the rule: the garbage collector frees anything that <b>no link can reach</b>. Right now <code>greetSam</code> reaches the function, which reaches the record — all alive. Press the button to set <code>greetSam = null</code>, severing the last link, and watch the chain become unreachable and get swept.',
+  keyHead:'★ Reachability = lifetime',
+  key:'Memory isn\'t freed when a function "ends" — it\'s freed when <b>nothing points to it anymore.</b> A closure is just a pointer that keeps its variables reachable. Remove the pointer, and the closure\'s memory finally goes.'
+},
+{ // 6
+  title:'That\'s the whole thing', pill:{c:'green',t:'banked'},
+  hot:[1,2,3,7,8],
+  greet:'ƒ', fMake:'hidden',fGreet:'hidden',
+  hFn:'alive',hEnv:'alive', envArrow:true,holdArrow:true,
+  console:false, gc:'off',
+  explain:'Trace it once more: a function <b>created inside</b> another call keeps a hidden <code>[[Environment]]</code> link to that call\'s variables. The stack frame pops, but the variables live on the heap because the link still reaches them — until nothing does, and the collector takes them. That surviving link is a <b>closure</b>.',
+  keyHead:'★ Say it cold',
+  key:'"A closure is a function plus its <code>[[Environment]]</code> link to the variables it was born with — they stay on the heap as long as the closure can reach them." If that sentence flows, you own it. Now we can read <code>useChatStream</code>\'s <code>ownTurns</code> with this exact picture.'
+}
+];
+
+/* ── elements ─────────────────────────────────────────────────────────── */
+const $=id=>document.getElementById(id);
+const stage=$("stage"), wires=$("wires"), packet=$("packet");
+const elFglobal=$("f-global"),elFmake=$("f-make"),elFgreet=$("f-greet"),
+      elHfn=$("h-fn"),elHenv=$("h-env"),elSlot=$("slot-env"),
+      wEnv=$("wire-env"),wHold=$("wire-hold");
+let gcFired=false, packetTimer=null;
+
+/* draw the progress dots */
+const dotsWrap=$("dots");
+S.forEach((_,i)=>{const d=document.createElement("div");d.className="dot";
+  d.onclick=()=>go(i);dotsWrap.appendChild(d);});
+$("total").textContent=S.length;
+
+/* set a box's state class without nuking the .hidden transition target */
+function setBox(el,state){
+  el.classList.remove("active","alive","dead","collected");
+  if(state==="hidden"){el.classList.add("hidden");return;}
+  el.classList.remove("hidden");
+  if(state)el.classList.add(state);
+}
+
+/* compute a smooth path between two element edges, in stage coords */
+function pathBetween(fromEl,toEl,fromSide,toSide){
+  const s=stage.getBoundingClientRect();
+  const a=fromEl.getBoundingClientRect(), b=toEl.getBoundingClientRect();
+  const p=(r,side)=>{
+    if(side==="left")  return [r.left-s.left, r.top-s.top+r.height/2];
+    if(side==="right") return [r.right-s.left, r.top-s.top+r.height/2];
+    if(side==="top")   return [r.left-s.left+r.width/2, r.top-s.top];
+    return [r.left-s.left+r.width/2, r.bottom-s.top]; // bottom
+  };
+  const [x1,y1]=p(a,fromSide), [x2,y2]=p(b,toSide);
+  const dx=Math.max(40,Math.abs(x2-x1)*0.5);
+  return `M${x1},${y1} C${x1-dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
+}
+
+function layoutWires(step){
+  wires.setAttribute("width",stage.clientWidth);
+  wires.setAttribute("height",stage.clientHeight);
+  // env link: function's [[Environment]] slot -> env record (left edge)
+  if(step.envArrow && !elHfn.classList.contains("hidden") && !elHenv.classList.contains("hidden")){
+    wEnv.setAttribute("d",pathBetween(elSlot,elHenv,"right","right"));
+    wEnv.style.display="";
+    wEnv.classList.toggle("broken", step.gc==="done");
+  } else wEnv.style.display="none";
+  // hold link: greetSam binding (global frame) -> function object (left edge)
+  if(step.holdArrow && step.gc!=="done" && !elHfn.classList.contains("hidden")){
+    wHold.setAttribute("d",pathBetween(elFglobal,elHfn,"right","left"));
+    wHold.style.display="";
+  } else wHold.style.display="none";
+}
+
+function firePacket(){
+  // travel from the greetSam() frame to the env record
+  clearTimeout(packetTimer);
+  const s=stage.getBoundingClientRect();
+  const a=elFgreet.getBoundingClientRect(), b=elHenv.getBoundingClientRect();
+  packet.style.transition="none";
+  packet.style.left=(a.right-s.left-6)+"px";
+  packet.style.top=(a.top-s.top+a.height/2-6)+"px";
+  packet.style.opacity="0";
+  // force reflow then animate
+  void packet.offsetWidth;
+  packet.style.transition="";
+  packet.style.opacity="1";
+  packet.style.left=(b.left-s.left-6)+"px";
+  packet.style.top=(b.top-s.top+b.height/2-6)+"px";
+  packetTimer=setTimeout(()=>{packet.style.opacity="0";$("console").classList.add("show");},1100);
+}
+
+function runGC(){
+  if(gcFired)return; gcFired=true;
+  $("greetVal").textContent="null";
+  $("greetVal").className="v null";
+  $("gc-btn").disabled=true;
+  wHold.classList.add("broken");
+  // step 1: nothing reaches the chain -> mark dead
+  setTimeout(()=>{ elHfn.classList.add("dead"); elHenv.classList.add("dead");
+    wEnv.classList.add("broken");
+    const v=$("verdict"); v.textContent="unreachable → collected"; v.className="verdict dead show";
+  },350);
+  // step 2: sweep them away
+  setTimeout(()=>{ elHfn.classList.add("collected"); elHenv.classList.add("collected"); },1300);
+}
+
+/* ── render a step ────────────────────────────────────────────────────── */
+let i=0;
+function render(){
+  const st=S[i];
+
+  // title (re-trigger entrance animation)
+  const t=$("title"); t.classList.remove("in");
+  t.innerHTML=st.title+(st.pill?'<span class="pill '+st.pill.c+'">'+st.pill.t+'</span>':'');
+  void t.offsetWidth; t.classList.add("in");
+
+  // code highlight
+  document.querySelectorAll(".cl").forEach(l=>
+    l.classList.toggle("hot",(st.hot||[]).includes(+l.dataset.ln)));
+
+  // bindings
+  $("greetVal").textContent=st.greet;
+  $("greetVal").className="v"+(st.greet==="ƒ"?" fn":st.greet==="null"?" null":"");
+
+  // boxes
+  setBox(elFmake,st.fMake);
+  setBox(elFgreet,st.fGreet);
+  setBox(elHfn,st.hFn);
+  setBox(elHenv,st.hEnv);
+
+  // console + packet
+  $("console").classList.toggle("show",!!st.console && !st.packet);
+  packet.style.opacity="0";
+  if(st.packet) setTimeout(firePacket,420);
+
+  // garbage-collect bar
+  gcFired=false;
+  const gcbar=$("gcbar"), v=$("verdict"), btn=$("gc-btn");
+  if(st.gc==="armed"){ gcbar.style.display="flex"; btn.disabled=false;
+    $("greetVal").className="v fn"; v.className="verdict"; v.textContent="";
+    elHfn.classList.remove("dead","collected"); elHenv.classList.remove("dead","collected");
+  } else { gcbar.style.display="none"; }
+
+  // wires (after layout settles)
+  requestAnimationFrame(()=>requestAnimationFrame(()=>layoutWires(st)));
+
+  // explain / key cards
+  $("explain").innerHTML=st.explain;
+  $("keyHead").textContent=st.keyHead;
+  $("key").innerHTML=st.key;
+
+  // chrome
+  $("cur").textContent=i+1;
+  dotsWrap.querySelectorAll(".dot").forEach((d,k)=>{
+    d.classList.toggle("active",k===i); d.classList.toggle("done",k<i);});
+  $("prev").disabled=i===0; $("next").disabled=i===S.length-1;
+}
+
+function go(n){ i=Math.max(0,Math.min(S.length-1,n)); render(); }
+$("next").onclick=()=>go(i+1);
+$("prev").onclick=()=>go(i-1);
+$("gc-btn").onclick=runGC;
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="BUTTON")return;
+  if(e.key==="ArrowRight")go(i+1);
+  if(e.key==="ArrowLeft")go(i-1);
+});
+window.addEventListener("resize",()=>layoutWires(S[i]));
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The streaming reducer — useChatStream</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 820px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 24px 26px; min-height: 360px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+
+  /* ---- code panel ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 6px 12px 0; overflow:auto; max-height: 460px; }
+  .code-line {
+    display: flex; font-size: 12.5px; line-height: 1.72; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .42;
+  }
+  .code-line .ln { width: 34px; text-align: right; padding-right: 12px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.neutral { background: rgba(139,155,255,.15); color: var(--accent); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .step-text .term { color: var(--warn); font-weight: 600; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body b { color: var(--ink); }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+
+  /* ---- bespoke widgets ---- */
+  .lane { display:grid; grid-template-columns: 320px 1fr; gap: 18px; }
+  .lane-title { font-size: 11px; letter-spacing:.08em; text-transform:uppercase; color: var(--ink-dim); margin-bottom: 8px; }
+  .evbtns { display:flex; flex-wrap:wrap; gap:8px; }
+  .evbtn { font-size:12px; padding:7px 11px; border-radius:8px; }
+  .evbtn.token { border-color:#3a4170; }
+  .evbtn.stage { border-color:#4a5530; }
+  .evbtn.itin  { border-color:#553a55; }
+  .evbtn.done  { border-color:#553030; }
+  .evbtn.user  { border-color:#30505a; }
+
+  /* state panel */
+  .statebox { background:#0b0c14; border:1px solid var(--line); border-radius:11px; padding:12px 14px; font-size:12.5px; }
+  .statebox .k { color: var(--accent); }
+  .statebox .v { color: var(--ink); }
+  .statebox .row { padding:3px 0; border-bottom:1px dashed #1c2038; }
+  .statebox .row:last-child { border-bottom:0; }
+  .flash { animation: flash .8s ease; }
+  @keyframes flash { 0% { background: rgba(139,155,255,.25);} 100%{ background: transparent;} }
+
+  /* mini chat preview */
+  .preview { background:#0b0c14; border:1px solid var(--line); border-radius:11px; padding:14px; min-height: 180px; }
+  .bub { max-width: 86%; border-radius:14px; padding:8px 12px; font-size:13px; margin-bottom:8px; line-height:1.5; }
+  .bub.user { margin-left:auto; background:var(--accent); color:#0b0c14; border-bottom-right-radius:5px; }
+  .bub.assistant { background:#1a1d30; color:var(--ink); border-bottom-left-radius:5px; }
+  .caret::after { content:"▋"; color:var(--accent); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .stages-mini { margin-top:10px; display:flex; flex-direction:column; gap:5px; }
+  .smi { display:flex; align-items:center; gap:8px; font-size:12px; }
+  .pill { width:9px; height:9px; border-radius:50%; background:#3a3f5e; flex:none; }
+  .pill.active { background: var(--warn); box-shadow:0 0 0 3px rgba(246,182,87,.18); }
+  .pill.done { background: var(--good); }
+  .pill.error { background: var(--bad); }
+  .smi .lbl { color: var(--ink-dim); }
+  .smi.on .lbl { color: var(--ink); }
+  .itin-mini { margin-top:10px; font-size:12px; color:var(--good); border:1px dashed #2a4a3c; border-radius:8px; padding:8px 10px; }
+
+  .twocol { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .mini-h { font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:6px; }
+  .pro { color:var(--good); } .con { color:var(--bad); }
+  ul.tight { margin:0 0 0 16px; } ul.tight li { margin:3px 0; font-size:12.5px; color:var(--ink-dim); }
+  ul.tight li b { color: var(--ink); }
+  .pfilltag { display:inline-block; font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; margin-right:5px; }
+  .reset { font-size:11px; padding:5px 10px; }
+  .seq { font-size:11px; color:var(--ink-dim); margin-top:8px; word-break:break-word; }
+  .seq b { color: var(--warn); }
+  @media (max-width: 900px) { .info, .lane, .twocol { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">travel-booking-assistant · the chat front end</div>
+  <h1>The streaming reducer: turning a live SSE feed into render-ready state</h1>
+  <p class="sub">
+    One function — <code>reducer()</code> in <code>useChatStream.ts</code> — is the entire brain of the chat UI.
+    Typed events stream in off the wire (assistant tokens, pipeline-stage updates, the itinerary, a done signal);
+    one function folds each into the shape the screen renders. This page peels that open, then drills the thing
+    you freeze on: <b>changing it live when a senior leans over your desk.</b> Click the event buttons in the stage to
+    drive the reducer yourself.
+  </p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+  <!-- ===== SANDBOX VIEW (event lane + live state + preview) ===== -->
+  <div id="view-sandbox">
+    <div class="lane">
+      <div>
+        <div class="lane-title">SSE events arriving on the wire — click to dispatch</div>
+        <div class="evbtns" id="evbtns"></div>
+        <div class="seq" id="seq"></div>
+        <button class="reset" id="resetBtn" style="margin-top:12px;">↺ Reset stream state</button>
+
+        <div style="margin-top:16px;">
+          <div class="lane-title">ChatStreamState (after the reducer runs)</div>
+          <div class="statebox" id="statebox"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="lane-title">What the components render from that state</div>
+        <div class="preview">
+          <div id="pv-msgs"></div>
+          <div class="stages-mini" id="pv-stages"></div>
+          <div class="itin-mini" id="pv-itin" style="display:none;">✈ Itinerary received — ItineraryPanel now renders the plan</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CODE VIEW ===== -->
+  <div id="view-code" style="display:none;">
+    <div class="code-panel" id="codepanel"></div>
+  </div>
+
+  <!-- ===== COMPARE VIEW (reducer vs useState vs state machine) ===== -->
+  <div id="view-compare" style="display:none;">
+    <div class="twocol">
+      <div class="node" id="cmp-a"><div class="mini-h" id="cmp-a-h">Framing A</div><div id="cmp-a-b"></div></div>
+      <div class="node" id="cmp-b"><div class="mini-h" id="cmp-b-h">Framing B</div><div id="cmp-b-b"></div></div>
+    </div>
+    <div class="node" id="cmp-verdict" style="margin-top:14px;"><div class="mini-h">Verdict</div><div id="cmp-v-b"></div></div>
+  </div>
+
+  <!-- ===== ADD-A-CASE RIPPLE VIEW ===== -->
+  <div id="view-ripple" style="display:none;">
+    <div class="lane-title">Adding a <code>cost_update</code> event end-to-end — the four places that must change</div>
+    <div id="ripple-steps" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;"></div>
+  </div>
+
+  <!-- ===== CHECKLIST / BREAKDOWN VIEW ===== -->
+  <div id="view-list" style="display:none;">
+    <div id="list-body"></div>
+  </div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-h">★ Under the hood</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · in the sandbox steps, click the event buttons to drive the reducer yourself</p>
+
+<script>
+/* ── syntax highlighter ─────────────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","interface","type","switch","case","default","break","never"]);
+const FN = new Set(["useReducer","useRef","useCallback","useEffect","dispatch","reducer","Set","Map","Array","Object","find","map"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+= KW.has(m[3])?'<span class="c-kw">'+m[3]+'</span>'
+                     : FN.has(m[3])?'<span class="c-fn">'+m[3]+'</span>': esc(m[3]);
+    else out+=esc(m[4]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  el.innerHTML = "";
+  codeText.split("\n").forEach((line,idx)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(idx+1);
+    row.innerHTML='<span class="ln">'+(idx+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* The real reducer, lightly trimmed for the code view (grounded in useChatStream.ts). */
+const REDUCER_SRC =
+`type Action =                                   // a discriminated union:
+  | { type: "user_message"; id; content }       //   one variant per event kind,
+  | { type: "begin_turn"; turnId }              //   each tagged by .type
+  | { type: "token"; e: TokenEvent }
+  | { type: "stage"; e: StageEvent }
+  | { type: "itinerary"; e: ItineraryEvent }
+  | { type: "done"; e: DoneEvent };
+
+function reducer(state, action) {               // (state, action) => state
+  switch (action.type) {                        // branch on the tag
+    case "token": {                             // append a chunk of text
+      const { id, chunk } = action.e;
+      const existing = state.messages.find(
+        (m) => m.id === id && m.role === "assistant");
+      const messages = existing
+        ? state.messages.map((m) => m.id === id            // grow that bubble
+            ? { ...m, content: m.content + chunk } : m)
+        : [...state.messages,                              // or start one
+            { id, role: "assistant", content: chunk, streaming: true }];
+      return { ...state, messages, pendingTurnId: null, activeTurnId: id };
+    }
+    case "stage": {                             // flip one pipeline stage
+      const { id, name, status, detail } = action.e;
+      const stages = state.stages.map((s) =>
+        s.name === name ? { ...s, status, detail } : s);
+      return { ...state, stages, pendingTurnId: null, activeTurnId: id };
+    }
+    case "itinerary":
+      return { ...state, itinerary: action.e.itinerary, pendingTurnId: null };
+    case "done": {                              // mark the bubble finished
+      const messages = state.messages.map((m) =>
+        m.id === action.e.id ? { ...m, streaming: false } : m);
+      return { ...state, messages, activeTurnId: null, pendingTurnId: null };
+    }
+    default:                                    // unknown action -> no change
+      return state;
+  }
+}`;
+
+/* ── live reducer model (a faithful mini of the real one) ───────────────── */
+const STAGE_ORDER = ["intent","policy","pricing","approval"];
+const STAGE_LABELS = {
+  intent:"Understanding the request", policy:"Resolving entitlement & policy",
+  pricing:"Pricing live options", approval:"Approval & compliance"
+};
+function freshStages(){ return STAGE_ORDER.map(n=>({name:n,status:"pending"})); }
+const TURN = "turn_8f3";
+function initState(){
+  return { messages:[], stages:freshStages(), itinerary:null, activeTurnId:null, pendingTurnId:null };
+}
+let model = initState();
+let changed = new Set();   // keys that just changed (for flash)
+let seq = [];              // human-readable dispatched sequence
+
+function liveReducer(s, a){
+  switch(a.type){
+    case "user_message":
+      return {...s, messages:[...s.messages, {id:a.id, role:"user", content:a.content}]};
+    case "begin_turn":
+      return {...s, pendingTurnId:a.turnId, activeTurnId:a.turnId, stages:freshStages(), itinerary:null};
+    case "token": {
+      const {id,chunk}=a.e;
+      const existing=s.messages.find(m=>m.id===id&&m.role==="assistant");
+      const messages=existing
+        ? s.messages.map(m=> m.id===id&&m.role==="assistant" ? {...m, content:m.content+chunk} : m)
+        : [...s.messages, {id, role:"assistant", content:chunk, streaming:true}];
+      return {...s, messages, pendingTurnId:null, activeTurnId:id};
+    }
+    case "stage": {
+      const {id,name,status,detail}=a.e;
+      const stages=s.stages.map(st=> st.name===name ? {...st,status,detail} : st);
+      return {...s, stages, pendingTurnId:null, activeTurnId:id};
+    }
+    case "itinerary":
+      return {...s, itinerary:a.e.itinerary, pendingTurnId:null};
+    case "done": {
+      const messages=s.messages.map(m=> m.id===a.e.id ? {...m, streaming:false} : m);
+      return {...s, messages, activeTurnId:null, pendingTurnId:null};
+    }
+    default: return s;
+  }
+}
+
+/* scripted event feed for the Cardiff→Manchester turn */
+const TOKENS = ["For ", "2 Band 8 ", "nurses Cardiff→Manchester, ", "cheapest compliant is ", "the 06:42 direct."];
+let tokIx = 0;
+function diffKeys(before, after){
+  const ks=new Set();
+  if(before.messages!==after.messages) ks.add("messages");
+  if(before.stages!==after.stages) ks.add("stages");
+  if(before.itinerary!==after.itinerary) ks.add("itinerary");
+  if(before.activeTurnId!==after.activeTurnId) ks.add("activeTurnId");
+  if(before.pendingTurnId!==after.pendingTurnId) ks.add("pendingTurnId");
+  return ks;
+}
+function dispatch(action, label){
+  const before = model;
+  model = liveReducer(model, action);
+  changed = diffKeys(before, model);
+  seq.push(label);
+  renderLive(true);
+}
+function resetStream(){
+  model = initState(); changed=new Set(); seq=[]; tokIx=0;
+  renderLive(false);
+}
+
+/* the event buttons available in the sandbox */
+const EVENTS = [
+  { cls:"user", label:"user msg", fn:()=> dispatch(
+      {type:"user_message", id:"u1", content:"2 Band 8 nurses, Cardiff→Manchester, cheapest compliant"},
+      "user_message") },
+  { cls:"", label:"begin_turn", fn:()=> dispatch({type:"begin_turn", turnId:TURN}, "begin_turn") },
+  { cls:"token", label:"token", fn:()=>{
+      const chunk = TOKENS[Math.min(tokIx, TOKENS.length-1)]; tokIx++;
+      dispatch({type:"token", e:{id:TURN, chunk}}, "token");
+    } },
+  { cls:"stage", label:"stage: intent ✓", fn:()=> dispatch(
+      {type:"stage", e:{id:TURN, name:"intent", status:"done", detail:"2 pax, CDF→MAN"}}, "stage(intent,done)") },
+  { cls:"stage", label:"stage: policy ●", fn:()=> dispatch(
+      {type:"stage", e:{id:TURN, name:"policy", status:"active", detail:"Band 8 rail entitlement"}}, "stage(policy,active)") },
+  { cls:"stage", label:"stage: pricing ✗", fn:()=> dispatch(
+      {type:"stage", e:{id:TURN, name:"pricing", status:"error", detail:"fare feed timeout"}}, "stage(pricing,error)") },
+  { cls:"itin", label:"itinerary", fn:()=> dispatch(
+      {type:"itinerary", e:{id:TURN, itinerary:{ref:"CDF-MAN-0642"}}}, "itinerary") },
+  { cls:"done", label:"done", fn:()=> dispatch({type:"done", e:{id:TURN}}, "done") },
+];
+
+/* render the live sandbox (state box + preview) */
+function renderLive(flash){
+  // state box
+  const sb = document.getElementById("statebox");
+  const msgCount = model.messages.length;
+  const lastA = [...model.messages].reverse().find(m=>m.role==="assistant");
+  const doneStages = model.stages.filter(s=>s.status==="done").length;
+  const rows = [
+    ["messages", msgCount+" ["+model.messages.map(m=>m.role[0]).join(",")+"]"+(lastA&&lastA.streaming?" · streaming":"")],
+    ["stages", doneStages+"/4 done · "+model.stages.map(s=>s.status[0]).join("")],
+    ["itinerary", model.itinerary ? JSON.stringify(model.itinerary) : "null"],
+    ["activeTurnId", model.activeTurnId ?? "null"],
+    ["pendingTurnId", model.pendingTurnId ?? "null"],
+  ];
+  const keyName = {messages:"messages",stages:"stages",itinerary:"itinerary",activeTurnId:"activeTurnId",pendingTurnId:"pendingTurnId"};
+  sb.innerHTML = rows.map(([k,v])=>
+    '<div class="row '+(flash&&changed.has(k)?"flash":"")+'"><span class="k">'+k+':</span> <span class="v">'+esc(String(v))+'</span></div>'
+  ).join("");
+
+  // sequence
+  document.getElementById("seq").innerHTML = seq.length
+    ? "dispatched: " + seq.map(s=>"<b>"+esc(s)+"</b>").join(" → ")
+    : "no events yet — click a button above";
+
+  // message preview
+  const pv = document.getElementById("pv-msgs");
+  pv.innerHTML = model.messages.map(m=>
+    '<div class="bub '+m.role+(m.streaming?" caret":"")+'">'+esc(m.content)+'</div>'
+  ).join("") || '<div style="color:#4a4f72;font-size:12px;">empty chat</div>';
+
+  // stage pills
+  const ps = document.getElementById("pv-stages");
+  ps.innerHTML = model.stages.map(s=>{
+    const cls = s.status==="pending" ? "" : s.status;
+    const on = s.status!=="pending" ? "on" : "";
+    return '<div class="smi '+on+'"><span class="pill '+cls+'"></span><span class="lbl">'+STAGE_LABELS[s.name]+(s.detail?" — "+esc(s.detail):"")+'</span></div>';
+  }).join("");
+
+  // itinerary
+  document.getElementById("pv-itin").style.display = model.itinerary ? "block" : "none";
+}
+
+/* ── views & steps ──────────────────────────────────────────────────────── */
+function show(id){
+  ["view-sandbox","view-code","view-compare","view-ripple","view-list"].forEach(v=>{
+    document.getElementById(v).style.display = (v===id) ? "block" : "none";
+  });
+}
+
+const COMPARE = {
+  useState: {
+    aH:"5 × useState — the naive route", aB:
+      '<ul class="tight"><li><code>messages</code>, <code>stages</code>, <code>itinerary</code>, <code>activeTurnId</code>, <code>pendingTurnId</code> each its own <code>useState</code>.</li><li>A <span class="pro">token</span> event needs <code>setMessages</code> <b>and</b> <code>setActiveTurnId</code> <b>and</b> <code>setPendingTurnId(null)</code> — three setters, one event.</li></ul>',
+    bH:"1 × useReducer — what the code does", bB:
+      '<ul class="tight"><li>One <code>dispatch({type:"token", e})</code>. The <span class="term">reducer</span> owns which fields move together.</li><li>The "when a token arrives, also clear pending" rule lives in <b>one place</b> — the <code>case</code> — not scattered across the component.</li></ul>',
+    vH:"useReducer wins here", vB:
+      'When <b>one event updates several fields with a shared rule</b>, scattered <code>useState</code> setters drift apart and get the order wrong. The reducer makes the transition <b>atomic and named</b>: <code>case "token"</code> is the single source of truth for what a token does.'
+  },
+  xstate: {
+    aH:"A state machine (XState)", aB:
+      '<ul class="tight"><li>A <span class="term">state machine</span> = explicit named states (idle → streaming → done) plus the only legal transitions between them.</li><li>Brilliant when the question is <b>"which mode am I in and what\'s allowed next"</b> — it forbids illegal transitions by construction.</li></ul>',
+    bH:"The streaming reducer", bB:
+      '<ul class="tight"><li>Here there are really only 2 modes (idle / streaming) but <b>~6 event kinds firing repeatedly</b> within streaming, each just folding data in.</li><li>It\'s a <b>data accumulator</b>, not a mode chart. A machine would add ceremony for transitions that don\'t actually exist.</li></ul>',
+    vH:"Reducer wins — for now", vB:
+      'Reach for XState when <b>illegal transitions</b> are the bug you keep hitting (e.g. an approval workflow that must be resumable and gated). That\'s exactly why this project uses <b>LangGraph for the approval workflow</b> but a plain reducer for the chat surface. Right tool, right layer.'
+  }
+};
+function renderCompare(which){
+  const c = COMPARE[which];
+  document.getElementById("cmp-a-h").textContent = c.aH;
+  document.getElementById("cmp-a-b").innerHTML = c.aB;
+  document.getElementById("cmp-b-h").textContent = c.bH;
+  document.getElementById("cmp-b-b").innerHTML = c.bB;
+  document.getElementById("cmp-v-b").innerHTML = c.vB;
+  document.getElementById("cmp-verdict").querySelector(".mini-h").textContent = c.vH;
+}
+
+const RIPPLE = [
+  { tag:"1 · types.ts", txt:'<b>New wire type.</b> The server will push a <code>cost_update</code> frame. Add the interface to the WIRE section: <code>interface CostUpdateEvent { id: string; total: number; currency: string; }</code>. This is the contract — every consumer reads its shape from here so nothing drifts.' },
+  { tag:"2 · the Action union", txt:'<b>Add the variant.</b> Extend the <span class="term">discriminated union</span> <code>Action</code> with <code>| { type: "cost_update"; e: CostUpdateEvent }</code>. The moment you do this, TypeScript knows a new action shape exists.' },
+  { tag:"3 · the never check", txt:'<b>TS now lights up everywhere unsafe.</b> If the <code>default</code> case asserts <code>const _: never = action</code> (exhaustiveness), the compiler errors <i>here</i> until you handle the new variant — it literally points at the gap. (The shipped reducer uses a soft <code>default: return state</code>; tightening it to <code>never</code> is the upgrade that makes step 4 self-policing.)' },
+  { tag:"4 · the case + view state", txt:'<b>Add the handler.</b> <code>case "cost_update": return { ...state, runningCost: action.e.total };</code> — plus a <code>runningCost</code> field on <code>ChatStreamState</code>. The reducer (handleEvent) also needs a <code>case "cost_update"</code> to map the SSE frame to this action. Now a CostBadge component reads <code>runningCost</code> and renders.' },
+];
+function renderRipple(activeIx){
+  const wrap = document.getElementById("ripple-steps");
+  wrap.innerHTML = RIPPLE.map((r,ix)=>{
+    const hot = ix<=activeIx;
+    return '<div class="node '+(ix===activeIx?"hot":"")+'" style="'+(hot?"":"opacity:.4;")+'">'
+      + '<span class="pilltag" style="background:rgba(139,155,255,.15);color:var(--accent);">'+r.tag+'</span> '
+      + '<span style="font-size:13px;">'+r.txt+'</span></div>';
+  }).join("");
+}
+
+const CHECKLIST = `<div class="node" style="border-color:var(--good);">
+  <div class="mini-h" style="color:var(--good);">The repeatable "extend a reducer" checklist</div>
+  <ul class="tight" style="font-size:13px;">
+    <li><b>1. Wire type first.</b> If a new event comes off the network, give it an interface in <code>types.ts</code>. The shape is the contract.</li>
+    <li><b>2. Add the union variant.</b> One new <code>| { type: "x"; ... }</code> in the <code>Action</code> type. Don't widen <code>type</code> to <code>string</code> — that throws away the safety.</li>
+    <li><b>3. Let exhaustiveness guide you.</b> A <code>never</code> default makes the compiler list every place that must change. Follow the red squiggles; don't hunt by hand.</li>
+    <li><b>4. Add the <code>case</code>.</b> Return a <b>new</b> object (<code>{ ...state, field }</code>) — never mutate <code>state</code> in place, or React won't re-render.</li>
+    <li><b>5. Map the source to the action.</b> The SSE <code>handleEvent</code> switch must dispatch the new action, gated by the same <code>ownTurns</code> id check.</li>
+    <li><b>6. Consume the new view field.</b> A component reads it. State the reducer doesn't drive is dead weight.</li>
+  </ul>
+  <div style="font-size:12px;color:var(--ink-dim);margin-top:8px;">The whole point: each step is mechanical because the <i>types</i> tell you where to go. That's why a senior can say "add a case" and expect it in minutes, not an afternoon of grepping.</div>
+</div>`;
+
+const BREAKDOWN = `<div class="node" style="border-color:var(--bad);">
+  <div class="mini-h" style="color:var(--bad);">When a flat reducer stops being the right tool</div>
+  <ul class="tight" style="font-size:13px;">
+    <li><b>Deeply nested state.</b> Once <code>{ ...state, a:{ ...state.a, b:{ ...state.a.b, c }}}</code> appears, the spread noise hides the logic. → reach for <b>Immer</b> (write "mutating" code, get an immutable copy) or split into nested reducers.</li>
+    <li><b>Async side-effects.</b> A reducer must be <b>pure</b> — no fetches, no timers, no <code>dispatch</code> from inside. The SSE subscription lives in <code>useEffect</code> for exactly this reason. If effects start multiplying, → a middleware/listener layer (Redux Toolkit listeners) or a machine with services.</li>
+    <li><b>Cross-field invariants.</b> "pricing can't be <code>done</code> before policy is <code>done</code>" is a <b>rule about legal transitions</b>, not a data fold. A flat switch can't enforce ordering cleanly. → <b>state machine</b> (XState / LangGraph) where illegal transitions don't exist.</li>
+    <li><b>Many true modes.</b> If real modes multiply (idle / streaming / awaiting-approval / booking / failed) each with different legal events, the switch becomes a hidden machine. Make it an explicit one.</li>
+  </ul>
+  <div style="font-size:12px;color:var(--ink-dim);margin-top:8px;">This is why the project draws the line where it does: <b>chat surface = reducer</b> (data folding), <b>approval workflow = LangGraph</b> (durable, gated transitions). Knowing the boundary is the senior skill.</div>
+</div>`;
+
+const steps = [
+/* 0 */ {
+  view:"view-sandbox", title:"The pattern, plainly",
+  text:'A <span class="term">reducer</span> is one function with the shape <code>(state, action) => newState</code>: hand it the <b>current</b> state and a description of <b>one thing that happened</b> (an <span class="term">action</span>), it returns the <b>next</b> state. That is its whole job here — <b>fold each incoming wire event into the view state the chat renders.</b> Nothing else. It doesn\'t fetch, doesn\'t talk to the network, doesn\'t book anything.',
+  secH:"★ The one job", sec:'Wire events (token / stage / itinerary / done) come in off the SSE feed → the reducer folds each into <code>ChatStreamState</code> → React re-renders. <b>Try it:</b> click <code>user msg</code> then <code>begin_turn</code> below and watch the state box on the left and the chat preview on the right both update.',
+  sandboxOn:true
+},
+/* 1 */ {
+  view:"view-sandbox", title:"Wire types vs view types — the two worlds",
+  tag:{kind:"neutral", label:"types.ts"},
+  text:'<b>Wire types</b> are the exact shape the server pushes: <code>TokenEvent {id, chunk}</code>, <code>StageEvent {id, name, status}</code>, etc. <b>View types</b> are what the UI holds <i>after</i> folding: <code>ChatMessage</code> (a whole bubble built from many chunks), <code>StageState</code> (which adds a <code>"pending"</code> status that <b>never comes over the wire</b>). The reducer is the translator between them. <b>Click <code>token</code> a few times</b> — watch many <code>TokenEvent</code> chunks fold into one growing <code>ChatMessage</code>.',
+  secH:"★ Why two worlds", sec:'The UI shows all four stages up front and flips each as its event arrives — so it needs a <code>"pending"</code> state the server never sends (<code>types.ts:61-65</code>). Folding chunks into one bubble is the same idea: the wire is granular, the view is whole.',
+  sandboxOn:true
+},
+/* 2 */ {
+  view:"view-code", title:"Under the hood — peel below useReducer",
+  active:["L11","L12","L13","L37","L38"],
+  text:'<code>useReducer(reducer, initialState)</code> hands you <code>[state, dispatch]</code>. <code>dispatch(action)</code> doesn\'t change state directly — React calls <b>your</b> <code>reducer(currentState, action)</code>, stores the return value, and schedules a re-render. So <code>dispatch</code> is just "here\'s an event"; the <code>switch</code> is where state actually moves. It\'s not magic — it\'s a function you can read top to bottom.',
+  secH:"★ Where dispatch comes from", sec:'The SSE feed drives it. <code>openChatStream({ onEvent })</code> in a <code>useEffect</code> subscribes once on mount (<code>useChatStream.ts:173-176</code>); every frame calls <code>handleEvent</code> (<code>:153</code>), which maps the event name to a <code>dispatch({type, e})</code> (<code>:157-170</code>). EventSource → handleEvent → dispatch → reducer → render. That chain <b>is</b> the hook.'
+},
+/* 3 */ {
+  view:"view-code", title:"The action is a discriminated union",
+  active:["L1","L2","L3","L4","L5","L6","L7","L10"],
+  text:'A <span class="term">discriminated union</span> is a set of object shapes that all share one literal field (here <code>type</code>) used to tell them apart. <code>Action</code> is six shapes: <code>"user_message"</code>, <code>"begin_turn"</code>, <code>"token"</code>, <code>"stage"</code>, <code>"itinerary"</code>, <code>"done"</code> (<code>useChatStream.ts:39-45</code>). Inside <code>case "token"</code>, TypeScript <b>narrows</b> <code>action</code> to exactly the token shape — so <code>action.e</code> is a <code>TokenEvent</code> and nothing else. The tag drives both the branch and the typing.',
+  secH:"★ Why this is the spine", sec:'Because <code>type</code> is a literal union, the <code>switch</code> is provably exhaustive: add a <code>never</code> default and the compiler <b>refuses to build</b> until every variant is handled. That property is the whole reason "add a case" is safe to do live — covered in the next sections.'
+},
+/* 4 */ {
+  view:"view-code", title:"Folding: immutable returns, never mutation",
+  active:["L14","L15","L16","L17","L18","L19","L20","L21"],
+  text:'Look at <code>case "token"</code>. If a bubble for this <code>id</code> exists, it <code>.map()</code>s and returns <code>{ ...m, content: m.content + chunk }</code> — a <b>new</b> message object with the chunk appended. If not, it appends a fresh streaming bubble. Either way it returns <code>{ ...state, messages }</code> — a <b>brand-new state object</b>. It never writes <code>state.messages.push(...)</code>.',
+  secH:"★ Why new objects matter", sec:'React decides whether to re-render by checking if the state <b>reference</b> changed. Mutate in place and the reference is the same → React skips the render → your UI freezes mid-stream. Returning fresh objects is not style; it\'s the contract that makes streaming visibly update.'
+},
+/* 5 */ {
+  view:"view-sandbox", title:"Drive the full turn yourself",
+  text:'Now run the real north-star sequence. Click in order: <code>user msg</code> → <code>begin_turn</code> → <code>token</code> ×3 → <code>stage: intent ✓</code> → <code>stage: policy ●</code> → <code>itinerary</code> → <code>done</code>. Watch <code>activeTurnId</code> light on <code>begin_turn</code>, <code>pendingTurnId</code> clear on the first <code>token</code>, the bubble grow, stages flip, and the caret vanish on <code>done</code>. This is the entire Cardiff→Manchester chat, reduced.',
+  secH:"★ Read the cross-field rules", sec:'Notice how <b>several fields move on one event</b>: a <code>token</code> sets <code>messages</code> AND clears <code>pendingTurnId</code> AND sets <code>activeTurnId</code> (<code>useChatStream.ts:88-93</code>). That bundling is the reducer earning its keep — and the reason it beats scattered <code>useState</code> calls, which is the next step.',
+  sandboxOn:true
+},
+/* 6 */ {
+  view:"view-compare", title:"Why a reducer, not five useState calls",
+  compare:"useState",
+  text:'The naive alternative: one <code>useState</code> per field. It works until <b>one event has to move several fields together</b>. A <code>token</code> must append text, clear <code>pendingTurnId</code>, and set <code>activeTurnId</code> — three setters, and if any component forgets one or runs them out of order, the UI lies. The reducer makes that transition a single named, atomic operation. Compare the two framings on the left/right.',
+  secH:"★ The trade-off it costs", sec:'A reducer adds indirection: to know what a click does you read the <code>case</code>, not the component. For trivial single-field state that\'s overkill — just use <code>useState</code>. The reducer pays off precisely when <b>many transitions are driven by a typed event stream</b>, which is exactly this hook.'
+},
+/* 7 */ {
+  view:"view-compare", title:"Why not a state machine (XState)?",
+  compare:"xstate",
+  text:'A <span class="term">state machine</span> models <b>named modes and the only legal transitions between them</b> — great when "illegal transition" is your recurring bug. But the chat surface has ~2 real modes and ~6 event kinds that just <b>fold data</b> repeatedly. A machine would add transition ceremony for transitions that don\'t exist. It\'s an accumulator, not a mode chart.',
+  secH:"★ The project already draws this line", sec:'This is a deliberate architecture call, not an accident: <b>LangGraph runs the approval workflow</b> (durable, resumable, human-in-the-loop — illegal transitions must be impossible), while the <b>chat/RAG surface is a plain reducer</b>. Same app, two layers, two right tools.'
+},
+/* 8 */ {
+  view:"view-code", title:'"It\'s hard to read — refactor it." The legitimate moves',
+  active:["L13","L14","L15","L16","L17","L18","L19","L20","L21","L22","L23","L24","L25","L26"],
+  text:'A senior says the reducer\'s noisy. There is no single right answer — there are <b>routes with costs</b>. (1) <b>Extract per-event handlers</b>: <code>case "token": return applyToken(state, action.e)</code> — the switch becomes a table of contents; cost: more indirection. (2) <b>Action-creator helpers</b> (<code>token(e)</code> instead of literals) — fewer typos, slightly more surface. (3) <b>Immer</b> — write <code>draft.messages.push(...)</code>, get immutability for free; cost: a dependency + a layer of magic. (4) <b>Promote to a state machine</b> — only if the real pain is illegal transitions, not line count.',
+  secH:"★ How to actually answer live", sec:'Don\'t reach for a tool — diagnose first. <i>"Is it hard to read because each case is long (→ extract handlers), because spreads are noisy (→ Immer), or because the transitions are tangled (→ machine)?"</i> Naming the cause and matching one move to it is the senior signal. Picking a tool before naming the problem is the junior tell.'
+},
+/* 9 */ {
+  view:"view-ripple", title:'"Add a few things to the switch" — a new event end-to-end',
+  rippleIx:0,
+  text:'Concrete task: the server will now emit a <code>cost_update</code> event (live running cost of the itinerary). Watch the ripple light up. It is always the <b>same four moves</b>, in order. Step through with Next to reveal each.',
+  secH:"★ The four moves", sec:'1) new wire type in <code>types.ts</code> · 2) new variant in the <code>Action</code> union · 3) the <code>never</code> default flags every gap · 4) the <code>case</code> + the view field a component reads. TypeScript turns "where do I touch?" from guesswork into a list.'
+},
+/* 10 */ {
+  view:"view-ripple", title:"Exhaustiveness is your safety net",
+  rippleIx:2,
+  text:'<span class="term">Exhaustiveness</span> means: have you handled <b>every</b> variant of the union? The trick is a <code>default</code> case that assigns <code>action</code> to a variable of type <code>never</code> — the type that holds no values. If even one variant is unhandled, <code>action</code> isn\'t <code>never</code> there, so <b>the build fails and points at the exact gap</b>. Add <code>cost_update</code> to the union without a <code>case</code>, and the compiler red-flags the default until you fix it.',
+  secH:"★ Shipped vs ideal", sec:'The current reducer uses a soft <code>default: return state</code> (<code>useChatStream.ts:130-131</code>) — forgiving, but silent if you forget a case. Tightening it to a <code>never</code> assertion is the cheap upgrade that makes every future "add a case" self-policing. That\'s the move that lets a senior trust you to extend it live.'
+},
+/* 11 */ {
+  view:"view-ripple", title:"See the new case actually land",
+  rippleIx:3,
+  text:'The fourth move: <code>case "cost_update": return { ...state, runningCost: action.e.total };</code>, a <code>runningCost</code> field added to <code>ChatStreamState</code>, a matching <code>case</code> in <code>handleEvent</code> to dispatch it (gated by the same <code>ownTurns</code> id check on <code>:154-155</code>), and a <code>CostBadge</code> that reads it. Same pattern as <code>case "itinerary"</code> — fold one field, return new state, done.',
+  secH:"★ Don\'t skip the id gate", sec:'Every dispatch is gated by <code>ownTurns.current.has(id)</code> (<code>useChatStream.ts:155</code>) so stray frames from other turns are ignored. A new event type must pass through the same gate — forget it and you\'ll fold another turn\'s cost into this one. The ripple isn\'t done until the source mapping is in too.'
+},
+/* 12 */ {
+  view:"view-list", title:"Extending it safely — the repeatable checklist",
+  list:CHECKLIST,
+  text:'Generalise the ripple into a checklist you can run on <b>any</b> reducer, not just this one. Each step is mechanical <i>because the types tell you where to go</i> — which is the whole reason a typed reducer is fast to extend safely. Run top to bottom every time.',
+  secH:"★ The meta-point", sec:'The reducer\'s value isn\'t the switch — it\'s that <b>change becomes a procedure instead of a hunt</b>. When you can recite this list, "a senior asks you to change it live" stops being scary: you\'re not improvising, you\'re executing a known sequence.'
+},
+/* 13 */ {
+  view:"view-list", title:"Where a flat reducer breaks down",
+  list:BREAKDOWN,
+  text:'Reducers are not free of limits. Four signals say "this pattern is now fighting you": deeply nested state, async side-effects creeping in, cross-field <b>invariants</b> (rules about what\'s legal), and a genuine explosion of modes. Each has a known escape hatch.',
+  secH:"★ Knowing the boundary is the skill", sec:'A junior asks "is a reducer good?" A senior asks "good <b>for what</b>, and where does it stop?" This project answers it structurally: reducer for the data-folding chat surface, LangGraph for the gated approval workflow. Same insight, applied at architecture scale.'
+},
+];
+
+/* ── stage rendering ────────────────────────────────────────────────────── */
+let codeBuilt = false;
+function renderStage(step){
+  show(step.view);
+
+  if(step.view==="view-code"){
+    if(!codeBuilt){ buildCode("codepanel", REDUCER_SRC); codeBuilt=true; }
+    const act = new Set(step.active||[]);
+    document.querySelectorAll("#codepanel .code-line").forEach(el=>{
+      el.classList.toggle("hot", act.has(el.id));
+    });
+    // scroll first highlighted line into view
+    const first = (step.active||[])[0];
+    if(first){ const el=document.getElementById(first); if(el) el.scrollIntoView({block:"center", behavior:"smooth"}); }
+  }
+
+  if(step.view==="view-compare") renderCompare(step.compare);
+  if(step.view==="view-ripple") renderRipple(step.rippleIx);
+  if(step.view==="view-list") document.getElementById("list-body").innerHTML = step.list;
+  if(step.view==="view-sandbox") renderLive(false);
+}
+
+/* build event buttons + reset once */
+(function buildSandbox(){
+  const wrap = document.getElementById("evbtns");
+  EVENTS.forEach(ev=>{
+    const b=document.createElement("button");
+    b.className="evbtn "+ev.cls; b.textContent=ev.label;
+    b.onclick=ev.fn; wrap.appendChild(b);
+  });
+  document.getElementById("resetBtn").onclick=resetStream;
+  renderLive(false);
+})();
+
+/* ── stepper engine ─────────────────────────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("sec-h").textContent = s.secH || "★ Under the hood";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.sec ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.sec || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 4200);
+};
+document.addEventListener("keydown", e => {
+  const tag = (e.target && e.target.tagName) || "";
+  if (tag === "TEXTAREA" || tag === "INPUT") return;
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

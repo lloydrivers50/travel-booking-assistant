@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NestJS Request Flow — Travel Booking Assistant</title>
+<style>
+  :root{
+    --bg:#0b0f17;
+    --panel:#111726;
+    --panel-2:#0e1422;
+    --ink:#e6edf6;
+    --muted:#8aa0bd;
+    --line:#1e293b;
+    --accent:#5eead4;   /* teal */
+    --accent-2:#a78bfa; /* violet */
+    --warn:#fbbf24;
+    --good:#34d399;
+    --bad:#f87171;
+    --code-bg:#0a0e16;
+    --pill:#16213a;
+    --shadow:0 18px 50px rgba(0,0,0,.45);
+    --r:16px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(94,234,212,.07), transparent 60%),
+      radial-gradient(900px 500px at -10% 10%, rgba(167,139,250,.08), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+
+  header.top{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;
+    background:linear-gradient(140deg,var(--accent),var(--accent-2));color:#06121b;font-weight:800;font-size:20px;box-shadow:var(--shadow)}
+  .brand h1{font-size:18px;margin:0;letter-spacing:.2px}
+  .brand p{margin:0;color:var(--muted);font-size:12.5px}
+  .topmeta{color:var(--muted);font-size:12px;text-align:right}
+  .topmeta a{color:var(--accent);text-decoration:none}
+
+  .hero{
+    background:linear-gradient(180deg,rgba(167,139,250,.08),transparent);
+    border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;margin-bottom:18px}
+  .hero h2{margin:0 0 6px;font-size:22px}
+  .hero p{margin:0;color:var(--muted);font-size:14px;max-width:90ch}
+  .hero .req{margin-top:12px;font-family:var(--mono);font-size:12.5px;color:var(--ink);
+    background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .hero .req b{color:var(--accent)}
+
+  /* stepper rail */
+  .rail{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:18px 0 6px}
+  .dot{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--panel);
+    color:var(--muted);border-radius:999px;padding:7px 12px;font-size:12px;cursor:pointer;transition:.18s;user-select:none}
+  .dot .n{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;
+    background:var(--pill);color:var(--muted)}
+  .dot:hover{border-color:var(--accent-2);color:var(--ink)}
+  .dot.active{border-color:var(--accent);color:var(--ink);box-shadow:0 0 0 1px rgba(94,234,212,.3) inset}
+  .dot.active .n{background:linear-gradient(140deg,var(--accent),var(--accent-2));color:#06121b}
+  .dot.done .n{background:rgba(52,211,153,.2);color:var(--good)}
+
+  /* controls */
+  .controls{display:flex;align-items:center;gap:10px;margin:14px 0 20px}
+  .btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer;transition:.15s;font-weight:600}
+  .btn:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.primary{background:linear-gradient(140deg,var(--accent),var(--accent-2));color:#06121b;border:none}
+  .counter{color:var(--muted);font-size:12.5px;margin-left:auto}
+  .counter b{color:var(--ink)}
+
+  /* main grid */
+  .grid{display:grid;grid-template-columns:1.05fr .95fr;gap:18px;align-items:start}
+  @media(max-width:920px){.grid{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+  .card .hd{padding:13px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .card .hd .tag{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700}
+  .card .bd{padding:16px}
+
+  /* the stage = pipeline diagram */
+  #stage{padding:8px 6px 14px}
+  .pipe{display:flex;flex-direction:column;gap:8px}
+  .reqline{font-family:var(--mono);font-size:11.5px;color:var(--muted);padding:6px 10px;border:1px dashed var(--line);
+    border-radius:8px;display:flex;align-items:center;gap:8px}
+  .reqline .pulse{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 rgba(94,234,212,.6);animation:p 1.6s infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(94,234,212,.5)}70%{box-shadow:0 0 0 9px rgba(94,234,212,0)}100%{box-shadow:0 0 0 0 rgba(94,234,212,0)}}
+
+  .node{position:relative;border:1px solid var(--line);background:var(--panel-2);border-radius:12px;padding:11px 13px;
+    display:flex;align-items:center;gap:12px;transition:.22s;opacity:.5}
+  .node .ico{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:16px;flex:none;
+    background:var(--pill);border:1px solid var(--line)}
+  .node .meta{min-width:0}
+  .node .meta .name{font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .node .meta .role{color:var(--muted);font-size:11.5px}
+  .node .order{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted);
+    border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
+  .node.lit{opacity:1;border-color:var(--accent);box-shadow:0 0 0 1px rgba(94,234,212,.25) inset, var(--shadow)}
+  .node.lit .ico{background:linear-gradient(140deg,rgba(94,234,212,.25),rgba(167,139,250,.25));border-color:var(--accent)}
+  .node.passed{opacity:.92;border-color:rgba(52,211,153,.4)}
+  .node.passed .order{color:var(--good);border-color:rgba(52,211,153,.4)}
+  .node .badge{font-size:10px;font-weight:700;border-radius:999px;padding:2px 8px}
+  .badge.dec{background:rgba(167,139,250,.18);color:#c4b5fd}
+  .badge.do{background:rgba(94,234,212,.16);color:var(--accent)}
+  .arrow{height:14px;display:grid;place-items:center;color:var(--line)}
+  .arrow svg{opacity:.6}
+  .node.lit + .arrow, .node.passed + .arrow{color:var(--accent)}
+
+  .respline{font-family:var(--mono);font-size:11.5px;color:var(--good);padding:6px 10px;border:1px dashed rgba(52,211,153,.4);
+    border-radius:8px;display:none;align-items:center;gap:8px}
+  .respline.show{display:flex}
+
+  /* explanation card */
+  .exp h3{margin:0 0 8px;font-size:17px}
+  .exp p{margin:0 0 10px;font-size:14px;color:var(--ink)}
+  .exp .term{color:var(--accent);font-weight:700}
+  .exp .term2{color:var(--accent-2);font-weight:700}
+  .exp ul{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
+  .exp ul li{margin:4px 0}
+
+  .secondary{margin-top:16px}
+  .secondary .hd .tag{color:var(--accent-2)}
+  .secondary .bd{font-size:13px;color:var(--muted)}
+  .secondary .bd b{color:var(--ink)}
+
+  /* code panel */
+  .code{margin-top:16px;background:var(--code-bg);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .code .chd{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .code .chd .d{width:10px;height:10px;border-radius:50%;background:#33415544}
+  .code .chd .fn{margin-left:6px;color:var(--ink)}
+  pre.src{margin:0;padding:12px 0;font-family:var(--mono);font-size:12.2px;line-height:1.65;overflow-x:auto}
+  pre.src .ln{display:block;padding:0 14px;white-space:pre;border-left:2px solid transparent}
+  pre.src .ln.hot{background:rgba(94,234,212,.10);border-left-color:var(--accent)}
+  /* syntax */
+  .t-key{color:#c792ea}
+  .t-dec{color:#82aaff}
+  .t-str{color:#c3e88d}
+  .t-com{color:#5b6b85;font-style:italic}
+  .t-num{color:#f78c6c}
+  .t-fn{color:#82aaff}
+  .t-typ{color:#ffcb6b}
+  .t-punc{color:#89ddff}
+
+  /* live state */
+  .state{margin-top:16px}
+  .state .hd .tag{color:var(--warn)}
+  .ctx{font-family:var(--mono);font-size:11.8px;color:var(--ink)}
+  .ctx .row{display:flex;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line)}
+  .ctx .row:last-child{border-bottom:none}
+  .ctx .k{color:var(--muted);min-width:130px}
+  .ctx .v{color:var(--ink)}
+  .ctx .v.ok{color:var(--good)}
+  .ctx .v.wait{color:var(--muted)}
+  .ctx .v.block{color:var(--bad)}
+
+  .cite{margin-top:18px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}
+  .cite a{color:var(--accent);text-decoration:none}
+  .cite a:hover{text-decoration:underline}
+  .kbd{font-family:var(--mono);font-size:11px;background:var(--pill);border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:var(--muted)}
+  footer.foot{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <div class="logo">N</div>
+      <div>
+        <h1>How a Request Flows Through NestJS</h1>
+        <p>Anchored to the Travel Booking Assistant&rsquo;s <b style="color:var(--accent)">itinerary</b> GraphQL query</p>
+      </div>
+    </div>
+    <div class="topmeta">
+      Grounded in <a href="https://docs.nestjs.com" target="_blank" rel="noopener">docs.nestjs.com</a><br/>
+      Use <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> to step
+    </div>
+  </header>
+
+  <section class="hero">
+    <h2>One request, seven moving parts</h2>
+    <p>
+      <b>NestJS</b> is a TypeScript backend framework. It does not let your code sprawl &mdash; it forces every
+      incoming request through a fixed, predictable <b>pipeline</b> of small, single-job pieces. This walkthrough
+      follows <i>one</i> real request through that pipeline: a client asking our assistant for a proposed,
+      policy-compliant travel itinerary. Each step defines one piece, says <i>why it exists</i>, and shows where
+      it sits in the request&rsquo;s life.
+    </p>
+    <div class="req">
+      GraphQL request &rarr; <b>query { itinerary(input:{ from:"Cardiff", to:"Manchester", travellers:2, band:"8" }) { legs cost citations } }</b>
+    </div>
+  </section>
+
+  <div class="rail" id="rail"></div>
+
+  <div class="controls">
+    <button class="btn" id="back">&larr; Back</button>
+    <button class="btn primary" id="play">&#9654; Play</button>
+    <button class="btn" id="next">Next &rarr;</button>
+    <span class="counter">Step <b id="cur">1</b> / <span id="tot">9</span></span>
+  </div>
+
+  <div class="grid">
+
+    <!-- LEFT: the pipeline stage -->
+    <div class="card">
+      <div class="hd"><span class="tag">Request Lifecycle &mdash; execution order</span></div>
+      <div class="bd">
+        <div id="stage"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: explanation + secondary + code + state -->
+    <div>
+      <div class="card exp">
+        <div class="hd"><span class="tag">What this piece is</span></div>
+        <div class="bd" id="exp"></div>
+      </div>
+
+      <div class="card secondary">
+        <div class="hd"><span class="tag" id="sec-tag">Why it exists</span></div>
+        <div class="bd" id="sec"></div>
+      </div>
+
+      <div class="code">
+        <div class="chd"><span class="d"></span><span class="d"></span><span class="d"></span>
+          <span class="fn" id="code-file">itinerary.module.ts</span></div>
+        <pre class="src" id="code"></pre>
+      </div>
+
+      <div class="card state">
+        <div class="hd"><span class="tag">Live request context (ctx)</span></div>
+        <div class="bd"><div class="ctx" id="ctx"></div></div>
+      </div>
+
+      <div class="cite" id="cite"></div>
+    </div>
+  </div>
+
+  <footer class="foot">
+    Teaching artifact for the Travel Booking Assistant. Every claim and code shape is grounded in the live NestJS docs (cited per step).
+  </footer>
+</div>
+
+<script>
+/* ----------------------------------------------------------------------------
+   Lightweight TS/JS syntax highlighter (no deps).
+---------------------------------------------------------------------------- */
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function highlight(line){
+  let s = esc(line);
+  // comments first
+  s = s.replace(/(\/\/.*$)/g, '<span class="t-com">$1</span>');
+  // strings
+  s = s.replace(/('[^']*'|"[^"]*"|`[^`]*`)/g, '<span class="t-str">$1</span>');
+  // decorators
+  s = s.replace(/(@[A-Za-z]+)/g, '<span class="t-dec">$1</span>');
+  // keywords
+  s = s.replace(/\b(import|from|export|class|extends|implements|constructor|private|public|readonly|return|new|async|await|const|let|this|void|interface|true|false|null)\b/g,'<span class="t-key">$1</span>');
+  // types (Capitalized words)
+  s = s.replace(/\b([A-Z][A-Za-z0-9]+)\b/g,'<span class="t-typ">$1</span>');
+  // numbers
+  s = s.replace(/\b(\d+)\b/g,'<span class="t-num">$1</span>');
+  return s;
+}
+
+/* ----------------------------------------------------------------------------
+   Pipeline nodes (the #stage). Conceptual teaching order matches the request,
+   with the REAL execution order shown on each node's right-hand label.
+   NestJS actual order (docs: faq/request-lifecycle):
+     Middleware -> Guards -> Interceptors(pre) -> Pipes -> Handler -> Service
+     -> Interceptors(post) -> Filters -> Response
+---------------------------------------------------------------------------- */
+const NODES = [
+  { id:"module",      ico:"&#129521;", name:"Module",            role:"wires the feature together (setup, not runtime)", order:"app boot", kind:"dec" },
+  { id:"provider",    ico:"&#128268;", name:"Provider / DI",     role:"injectable building block + how it's supplied",    order:"app boot", kind:"do"  },
+  { id:"guard",       ico:"&#128272;", name:"Guard",             role:"may this caller proceed? (authorization)",        order:"runs 1st", kind:"do"  },
+  { id:"interceptor", ico:"&#9201;",   name:"Interceptor (pre)", role:"wrap the call: start audit timer",                order:"runs 2nd", kind:"do"  },
+  { id:"pipe",        ico:"&#129529;", name:"Validation Pipe",   role:"validate + transform the input args",             order:"runs 3rd", kind:"do"  },
+  { id:"resolver",    ico:"&#128225;", name:"Resolver (Controller)", role:"entry point: receives the query",            order:"runs 4th", kind:"do"  },
+  { id:"service",     ico:"&#129302;", name:"Service",           role:"the business logic: build the itinerary",         order:"runs 5th", kind:"do"  },
+  { id:"interceptor2",ico:"&#9201;",   name:"Interceptor (post)",role:"on the way out: write the audit log",             order:"runs 6th", kind:"do"  },
+];
+
+function arrowSVG(){
+  return '<div class="arrow"><svg width="14" height="10" viewBox="0 0 14 10"><path d="M7 0 L7 7 M3 4 L7 8 L11 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>';
+}
+
+function buildStage(){
+  const st = document.getElementById("stage");
+  let html = '<div class="pipe">';
+  html += '<div class="reqline"><span class="pulse"></span> incoming GraphQL request &mdash; client "NHS-Trust-X" asks for an itinerary</div>';
+  html += arrowSVG();
+  NODES.forEach((n,i)=>{
+    html += `<div class="node" data-id="${n.id}">
+      <div class="ico">${n.ico}</div>
+      <div class="meta">
+        <div class="name">${n.name} <span class="badge ${n.kind}">${n.kind==='dec'?'wiring':'runtime'}</span></div>
+        <div class="role">${n.role}</div>
+      </div>
+      <div class="order">${n.order}</div>
+    </div>`;
+    if(i < NODES.length-1) html += arrowSVG();
+  });
+  html += arrowSVG();
+  html += '<div class="respline" id="respline">&larr; proposed compliant itinerary returned (with policy citations)</div>';
+  html += '</div>';
+  st.innerHTML = html;
+}
+
+/* ----------------------------------------------------------------------------
+   STEPS — one idea each. Each step lights certain nodes, swaps the code panel,
+   mutates the live ctx, and cites the exact doc page used.
+---------------------------------------------------------------------------- */
+const steps = [
+  /* 0 ----------------------------------------------------------------- */
+  {
+    lit:["module"], passed:[],
+    exp:`<h3>Module &mdash; the wiring diagram</h3>
+      <p>A <span class="term">module</span> is a class tagged with the <code>@Module()</code>
+      <span class="term2">decorator</span> (a decorator is just an annotation that attaches metadata to a class).
+      It groups everything that belongs to one feature: its controllers, its providers, and the other modules it depends on.</p>
+      <p>The docs put it plainly: every Nest app has at least one <b>root module</b>, and modules are
+      &ldquo;the most effective way to organize your components.&rdquo; Think of the module as the
+      <i>assembly instructions</i> &mdash; it runs once at boot, never per request.</p>
+      <ul>
+        <li><b>providers</b> &mdash; the injectable workers (services) this feature owns.</li>
+        <li><b>controllers/resolvers</b> &mdash; the entry points it exposes.</li>
+        <li><b>imports / exports</b> &mdash; how it borrows and lends pieces to other modules.</li>
+      </ul>`,
+    secTag:"Why it exists",
+    sec:`Without modules, a large app becomes one tangled graph of objects. The module draws a
+      <b>boundary</b> around the itinerary feature so Nest knows exactly which pieces exist and how to construct them.
+      In our app, <b>ItineraryModule</b> owns the resolver, the itinerary service, and pulls in the
+      <b>PolicyModule</b> (rules engine + RAG) and <b>EntitlementModule</b> it depends on.`,
+    file:"itinerary.module.ts",
+    code:[
+      "import { Module } from '@nestjs/common';",
+      "import { ItineraryResolver } from './itinerary.resolver';",
+      "import { ItineraryService } from './itinerary.service';",
+      "import { PolicyModule } from '../policy/policy.module';",
+      "",
+      "@Module({",
+      "  imports: [PolicyModule, EntitlementModule],",
+      "  providers: [ItineraryResolver, ItineraryService],",
+      "})",
+      "export class ItineraryModule {}",
+    ],
+    hot:[5,6,7,8],
+    ctx:{ phase:"app boot", auth:"—", input:"—", logic:"—", response:"—" },
+    cite:`Source: <a href="https://docs.nestjs.com/modules" target="_blank" rel="noopener">docs.nestjs.com/modules</a> &mdash; &ldquo;A module is a class annotated with a <code>@Module()</code> decorator&hellip; every application has at least one module, a root module.&rdquo;`
+  },
+
+  /* 1 ----------------------------------------------------------------- */
+  {
+    lit:["provider"], passed:["module"],
+    exp:`<h3>Provider &amp; Dependency Injection</h3>
+      <p>A <span class="term">provider</span> is any class Nest can create and hand to other classes.
+      You mark it with <code>@Injectable()</code>. <span class="term2">DI (Dependency Injection)</span> means:
+      a class never builds its own collaborators &mdash; it lists them in its constructor, and Nest
+      <i>supplies</i> them ready-made.</p>
+      <p>The docs say providers are &ldquo;a fundamental concept&hellip; many classes may be treated as a
+      provider &mdash; services, repositories, factories, helpers.&rdquo; Nest&rsquo;s <b>IoC container</b>
+      (Inversion of Control: the framework, not your code, owns object creation) resolves the whole graph at boot.</p>`,
+    secTag:"Why it exists",
+    sec:`DI is what makes the pieces in this pipeline <b>swappable and testable</b>. The resolver doesn&rsquo;t
+      <code>new ItineraryService()</code> &mdash; it asks for one in its constructor. In a test we hand it a fake.
+      In production Nest hands it the real one (which itself receives the policy engine, the entitlement lookup,
+      and supplier clients the same way). One declared dependency, supplied by the framework.`,
+    file:"itinerary.service.ts",
+    code:[
+      "import { Injectable } from '@nestjs/common';",
+      "",
+      "@Injectable()",
+      "export class ItineraryService {",
+      "  constructor(",
+      "    private readonly policy: PolicyService,",
+      "    private readonly entitlement: EntitlementService,",
+      "  ) {}",
+      "  // policy + entitlement were INJECTED, not constructed here",
+      "}",
+    ],
+    hot:[2,4,5,6,7],
+    ctx:{ phase:"app boot", auth:"—", input:"—", logic:"deps wired by container", response:"—" },
+    cite:`Source: <a href="https://docs.nestjs.com/providers" target="_blank" rel="noopener">docs.nestjs.com/providers</a> &mdash; &ldquo;The key idea behind a provider is that it can be injected as a dependency&hellip;&rdquo; <code>@Injectable()</code> &ldquo;attaches metadata&hellip; signaling that [it] is a class that can be managed by the Nest IoC container.&rdquo;`
+  },
+
+  /* 2 ----------------------------------------------------------------- */
+  {
+    lit:["resolver"], passed:["module","provider"],
+    exp:`<h3>Resolver &mdash; the GraphQL controller</h3>
+      <p>In REST, a <span class="term">controller</span> (class with <code>@Controller()</code>) maps URLs to
+      methods. For GraphQL, the docs say the equivalent is a <span class="term2">resolver</span> &mdash; a class
+      with <code>@Resolver()</code> whose methods are tagged <code>@Query()</code> or <code>@Mutation()</code>.</p>
+      <p>This is the <b>entry point</b>. Its only job is to receive the request, hand off to a service, and return
+      the result. The docs are explicit that controllers/resolvers should stay thin: &ldquo;handling&rdquo; lives in
+      providers, not here. Our <code>itinerary</code> query is one <code>@Query()</code> method.</p>`,
+    secTag:"In code",
+    sec:`We use the <b>code-first</b> approach (also from the docs): you write TypeScript classes with
+      <code>@ObjectType()</code>/<code>@Field()</code> and Nest generates the GraphQL schema for you.
+      The resolver below declares the <code>itinerary</code> query, takes a typed <code>input</code>, and delegates
+      straight to <code>ItineraryService</code>. <b>No business logic here</b> &mdash; that is deliberate.`,
+    file:"itinerary.resolver.ts",
+    code:[
+      "import { Resolver, Query, Args } from '@nestjs/graphql';",
+      "",
+      "@Resolver(() => Itinerary)",
+      "export class ItineraryResolver {",
+      "  constructor(private readonly service: ItineraryService) {}",
+      "",
+      "  @Query(() => Itinerary, { name: 'itinerary' })",
+      "  getItinerary(@Args('input') input: ItineraryInput) {",
+      "    return this.service.propose(input);",
+      "  }",
+      "}",
+    ],
+    hot:[2,6,7,8,9],
+    ctx:{ phase:"runtime", auth:"—", input:"received (raw)", logic:"delegates to service", response:"—" },
+    cite:`Source: <a href="https://docs.nestjs.com/graphql/resolvers" target="_blank" rel="noopener">docs.nestjs.com/graphql/resolvers</a> &mdash; resolvers expose queries with <code>@Resolver()</code> + <code>@Query()</code>; the code-first approach generates the schema from decorators.`
+  },
+
+  /* 3 ----------------------------------------------------------------- */
+  {
+    lit:["service"], passed:["module","provider","resolver"],
+    exp:`<h3>Service &mdash; where the real work happens</h3>
+      <p>A <span class="term">service</span> is just a provider that holds <b>business logic</b>. The docs steer
+      all real work out of controllers and into services so the logic is reusable and testable.</p>
+      <p>For us, <code>ItineraryService.propose()</code> is the heart of the DECIDE half: resolve the travellers&rsquo;
+      <span class="term2">entitlement</span> (their band, cost centre, approval level), run the <b>policy rules engine</b>
+      against the versioned store, price live options, and assemble a <b>proposed compliant itinerary with citations</b>.
+      Per our core rule: the model <i>explains</i>, deterministic code <i>enforces</i>.</p>`,
+    secTag:"Why it matters",
+    sec:`Keeping logic in the service is what lets the same itinerary engine be driven from GraphQL today and REST
+      tomorrow without rewriting it. The service is also where the <b>plan/outbox</b> contract eventually gets
+      produced &mdash; but only after approval. Here, at query time, it returns a <i>proposal</i>, never a booking.`,
+    file:"itinerary.service.ts",
+    code:[
+      "@Injectable()",
+      "export class ItineraryService {",
+      "  async propose(input: ItineraryInput): Promise<Itinerary> {",
+      "    const ent = await this.entitlement.resolve(input.band);",
+      "    const rules = await this.policy.rulesFor(ent, input.travelDate);",
+      "    const options = await this.suppliers.search(input);",
+      "    const compliant = this.policy.enforce(options, rules);",
+      "    return this.policy.explain(compliant); // adds citations",
+      "  }",
+      "}",
+    ],
+    hot:[2,3,4,5,6,7],
+    ctx:{ phase:"runtime", auth:"—", input:"validated", logic:"building itinerary", response:"—" },
+    cite:`Source: <a href="https://docs.nestjs.com/controllers" target="_blank" rel="noopener">docs.nestjs.com/controllers</a> &mdash; controllers &ldquo;are responsible for handling incoming requests and sending responses back to the client&rdquo;; business logic belongs in injectable providers (services), not the controller.`
+  },
+
+  /* 4 ----------------------------------------------------------------- */
+  {
+    lit:["guard"], passed:["module","provider"],
+    exp:`<h3>Guard &mdash; &ldquo;may this caller proceed?&rdquo;</h3>
+      <p>Now we switch to the <b>runtime pipeline</b>, in true execution order. The <span class="term">guard</span>
+      runs <b>first</b>. A guard is an <code>@Injectable()</code> class implementing <code>CanActivate</code>;
+      its <code>canActivate()</code> returns <code>true</code> to allow the request or throws/returns
+      <code>false</code> to reject it.</p>
+      <p>The docs define a guard&rsquo;s single responsibility: they &ldquo;determine whether a given request will be
+      handled by the route handler or not, depending on certain conditions (like permissions, roles, ACLs) present at
+      run-time&rdquo; &mdash; i.e. <span class="term2">authorization</span>, decided from the runtime
+      <code>ExecutionContext</code>. Crucially the docs state guards run <b>after each middleware, but before any
+      interceptor or pipe</b>.</p>`,
+    secTag:"Gotcha &mdash; ordering",
+    sec:`Don&rsquo;t assume guards run last because they sound like a &ldquo;final check.&rdquo; Per the docs&rsquo;
+      request-lifecycle order, the sequence is <b>Middleware &rarr; Guard &rarr; Interceptor (pre) &rarr; Pipe &rarr;
+      Handler</b>. The guard goes first so we <b>never waste work</b> validating or logging a request the caller was
+      never allowed to make. For us this is <b>per-client access scoping</b>: NHS-Trust-X may only query its own
+      itineraries &mdash; multi-tenant isolation enforced here.`,
+    file:"tenant-scope.guard.ts",
+    code:[
+      "import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';",
+      "",
+      "@Injectable()",
+      "export class TenantScopeGuard implements CanActivate {",
+      "  canActivate(ctx: ExecutionContext): boolean {",
+      "    const { user } = GqlExecutionContext.create(ctx).getContext().req;",
+      "    return user.tenantId === 'NHS-Trust-X'; // own data only",
+      "  }",
+      "}",
+    ],
+    hot:[3,4,5,6],
+    ctx:{ phase:"runtime", auth:"checking tenant…", input:"not yet validated", logic:"—", response:"—" },
+    cite:`Source: <a href="https://docs.nestjs.com/guards" target="_blank" rel="noopener">docs.nestjs.com/guards</a> &mdash; &ldquo;Guards have a single responsibility&hellip; This is often referred to as authorization&hellip; Guards are executed after each middleware, but before any interceptor or pipe.&rdquo;`
+  },
+
+  /* 5 ----------------------------------------------------------------- */
+  {
+    lit:["guard"], passed:["module","provider"], block:true,
+    exp:`<h3>Guard says no &mdash; the request stops</h3>
+      <p>If <code>canActivate()</code> returns <code>false</code> (or throws), Nest <b>short-circuits</b>: the
+      interceptor, the pipe, the resolver and the service all <b>never run</b>. The client gets a
+      <code>ForbiddenException</code> and nothing downstream is touched.</p>
+      <p>This is the whole point of putting authorization first. A caller from a different tenant asking for
+      Trust X&rsquo;s itinerary is rejected <b>before</b> a single policy rule is evaluated or a supplier is called.</p>`,
+    secTag:"Why it matters",
+    sec:`For a public-sector client, <b>per-client access scoping is a requirement, not polish</b> (DESIGN.md).
+      The guard is the one place that requirement is enforced for every itinerary request, uniformly &mdash; you
+      can&rsquo;t forget to add it to one resolver method if it&rsquo;s bound at the module or app level.`,
+    file:"tenant-scope.guard.ts",
+    code:[
+      "  canActivate(ctx: ExecutionContext): boolean {",
+      "    const { user } = GqlExecutionContext.create(ctx).getContext().req;",
+      "    if (user.tenantId !== 'NHS-Trust-X') {",
+      "      return false; // -> 403 Forbidden, pipeline halts here",
+      "    }",
+      "    return true;",
+      "  }",
+    ],
+    hot:[2,3,4],
+    ctx:{ phase:"runtime", auth:"DENIED — wrong tenant", input:"never validated", logic:"never ran", response:"403 Forbidden", blockKeys:["auth","response"] },
+    cite:`Source: <a href="https://docs.nestjs.com/guards" target="_blank" rel="noopener">docs.nestjs.com/guards</a> &mdash; returning <code>false</code> from <code>canActivate</code> denies the request; Nest throws a <code>ForbiddenException</code> and downstream handlers do not execute.`
+  },
+
+  /* 6 ----------------------------------------------------------------- */
+  {
+    lit:["interceptor"], passed:["module","provider","guard"],
+    exp:`<h3>Interceptor &mdash; wrap the call (before)</h3>
+      <p>The guard passed, so next the <span class="term">interceptor</span> runs. An interceptor is an
+      <code>@Injectable()</code> class implementing <code>NestInterceptor</code> with an <code>intercept()</code>
+      method. It is <b>aspect-oriented</b>: it can run logic <i>before</i> the handler and, using an RxJS stream,
+      <i>after</i> it too.</p>
+      <p>The docs list interceptor abilities: bind extra logic before/after method execution, transform the result,
+      and extend behaviour. The key is the <span class="term2">CallHandler</span>: calling <code>next.handle()</code>
+      is what actually invokes the rest of the pipeline (pipe &rarr; resolver &rarr; service). Code <i>before</i>
+      that call runs now; code piped onto the result runs on the way back.</p>`,
+    secTag:"In code",
+    sec:`We use the interceptor for <b>audit logging</b> &mdash; a hard requirement for our public-sector clients.
+      Right now (the &ldquo;before&rdquo; half) it records who asked, for what, and starts a timer. The
+      <code>tap()</code> operator queued onto the stream will fire once the itinerary comes back.`,
+    file:"audit.interceptor.ts",
+    code:[
+      "import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';",
+      "import { tap } from 'rxjs/operators';",
+      "",
+      "@Injectable()",
+      "export class AuditInterceptor implements NestInterceptor {",
+      "  intercept(ctx: ExecutionContext, next: CallHandler) {",
+      "    const start = Date.now();        // <-- runs BEFORE the handler",
+      "    return next.handle().pipe(       // <-- triggers the rest of the pipeline",
+      "      tap(() => this.audit.write(ctx, Date.now() - start)),",
+      "    );",
+      "  }",
+      "}",
+    ],
+    hot:[5,6,7,8],
+    ctx:{ phase:"runtime", auth:"allowed ✓", input:"about to validate", logic:"audit timer started", response:"—", okKeys:["auth"] },
+    cite:`Source: <a href="https://docs.nestjs.com/interceptors" target="_blank" rel="noopener">docs.nestjs.com/interceptors</a> &mdash; interceptors &ldquo;bind extra logic before / after method execution&rdquo;; <code>next.handle()</code> returns an Observable for the route handler&rsquo;s response.`
+  },
+
+  /* 7 ----------------------------------------------------------------- */
+  {
+    lit:["pipe"], passed:["module","provider","guard","interceptor"],
+    exp:`<h3>Validation Pipe &mdash; clean the input</h3>
+      <p>Right before the resolver method runs, the <span class="term">pipe</span> operates on the incoming
+      arguments. A pipe is an <code>@Injectable()</code> class implementing <code>PipeTransform</code>; the built-in
+      <span class="term2">ValidationPipe</span> is the common one. Pipes do two things per the docs:
+      <b>transformation</b> (coerce input to the right type) and <b>validation</b> (reject bad input).</p>
+      <p>The docs are precise on timing: pipes run &ldquo;just before a method is invoked,&rdquo; on that method&rsquo;s
+      arguments &mdash; i.e. after the guard and interceptor-before, but before the resolver. Validation rules live on a
+      <b>DTO</b> (Data Transfer Object: a class describing the shape of the input) using
+      <code>class-validator</code> decorators.</p>`,
+    secTag:"In code",
+    sec:`Our <b>ItineraryInput</b> DTO carries the rules: a real city in <code>from</code>/<code>to</code>,
+      <code>travellers</code> between 1 and 20, a recognised pay <code>band</code>. If the query asked for
+      <code>travellers: -3</code>, the pipe throws a <code>400</code> <b>before</b> any entitlement or policy code sees
+      it. The service can then trust its input absolutely &mdash; no defensive re-checking.`,
+    file:"itinerary.input.ts",
+    code:[
+      "import { InputType, Field, Int } from '@nestjs/graphql';",
+      "import { IsString, Min, Max, IsIn } from 'class-validator';",
+      "",
+      "@InputType()",
+      "export class ItineraryInput {",
+      "  @Field() @IsString() from: string;",
+      "  @Field() @IsString() to: string;",
+      "  @Field(() => Int) @Min(1) @Max(20) travellers: number;",
+      "  @Field() @IsIn(['5','6','7','8','9']) band: string;",
+      "}",
+    ],
+    hot:[6,7,8,9],
+    ctx:{ phase:"runtime", auth:"allowed ✓", input:"validated ✓", logic:"about to run", response:"—", okKeys:["auth","input"] },
+    cite:`Source: <a href="https://docs.nestjs.com/pipes" target="_blank" rel="noopener">docs.nestjs.com/pipes</a> &mdash; &ldquo;A pipe&hellip; transformation or validation&hellip; operate on the arguments&hellip; just before the method is invoked.&rdquo; Validation uses <code>ValidationPipe</code> + <code>class-validator</code> on a DTO.`
+  },
+
+  /* 8 ----------------------------------------------------------------- */
+  {
+    lit:["interceptor2"], passed:["module","provider","guard","interceptor","pipe","resolver","service"],
+    resp:true,
+    exp:`<h3>The way back out &mdash; full lifecycle</h3>
+      <p>The handler ran, the service built the itinerary, and now the stream unwinds back <i>through</i> the
+      interceptor. The <code>tap()</code> we queued earlier fires &mdash; the <span class="term">audit log</span>
+      is written with the result and elapsed time &mdash; then the response leaves Nest.</p>
+      <p>That completes the documented order, end to end:</p>
+      <ul>
+        <li><b>Middleware</b> &rarr; <b>Guard</b> (authorize) &rarr; <b>Interceptor</b> (before) &rarr;
+            <b>Pipe</b> (validate) &rarr; <b>Resolver</b> &rarr; <b>Service</b> &rarr;
+            <b>Interceptor</b> (after) &rarr; <b>Exception filters</b> (if it threw) &rarr; <b>Response</b>.</li>
+      </ul>
+      <p>The <span class="term2">module</span> and <span class="term2">providers/DI</span> aren&rsquo;t in this runtime
+      line &mdash; they ran once at boot to <i>assemble</i> everything the request just flowed through.</p>`,
+    secTag:"The one thing to remember",
+    sec:`<b>Guards run before interceptors, and interceptors before pipes.</b> Authorization decides
+      <i>whether</i> to do work; the interceptor wraps the work (and is the only piece that runs on both the way in
+      <i>and</i> the way out); the pipe guarantees the input is clean the instant before your logic runs. Each piece has
+      exactly one job, in a fixed order &mdash; that predictability is the whole reason to use NestJS.`,
+    file:"audit.interceptor.ts",
+    code:[
+      "    return next.handle().pipe(",
+      "      // handler + service have now produced the itinerary",
+      "      tap((itinerary) =>",
+      "        this.audit.write({",
+      "          tenant: 'NHS-Trust-X',",
+      "          legs: itinerary.legs.length,",
+      "          ms: Date.now() - start,",
+      "        }),",
+      "      ),",
+      "    );",
+    ],
+    hot:[1,2,3,4,5,6,7],
+    ctx:{ phase:"responding", auth:"allowed ✓", input:"validated ✓", logic:"itinerary built ✓", response:"200 + audit written ✓", okKeys:["auth","input","logic","response"] },
+    cite:`Source: <a href="https://docs.nestjs.com/faq/request-lifecycle" target="_blank" rel="noopener">docs.nestjs.com/faq/request-lifecycle</a> &mdash; documented order: middleware &rarr; guards &rarr; interceptors (pre-controller) &rarr; pipes &rarr; route handler &rarr; interceptors (post-controller) &rarr; exception filters &rarr; response.`
+  },
+];
+
+/* ----------------------------------------------------------------------------
+   Render engine
+---------------------------------------------------------------------------- */
+let i = 0;
+let playing = false;
+let timer = null;
+
+function buildRail(){
+  const rail = document.getElementById("rail");
+  const labels = ["Module","Provider/DI","Resolver","Service","Guard","Guard&nbsp;denies","Interceptor","Pipe","Lifecycle"];
+  rail.innerHTML = steps.map((s,idx)=>
+    `<div class="dot" data-i="${idx}"><span class="n">${idx+1}</span><span>${labels[idx]}</span></div>`
+  ).join("");
+  rail.querySelectorAll(".dot").forEach(d=>{
+    d.addEventListener("click",()=>{ i = +d.dataset.i; stopPlay(); render(); });
+  });
+  document.getElementById("tot").textContent = steps.length;
+}
+
+function renderStage(step){
+  document.querySelectorAll(".node").forEach(n=>{
+    n.classList.remove("lit","passed");
+    const id = n.dataset.id;
+    if(step.passed && step.passed.includes(id)) n.classList.add("passed");
+    if(step.lit && step.lit.includes(id)) n.classList.add("lit");
+  });
+  const node = step.lit && step.lit.length ? document.querySelector(`.node[data-id="${step.lit[0]}"]`) : null;
+  if(step.block && node){
+    node.style.borderColor = "var(--bad)";
+    node.querySelector(".order").style.color = "var(--bad)";
+  } else {
+    document.querySelectorAll(".node").forEach(n=>{ n.style.borderColor=""; n.querySelector(".order").style.color=""; });
+  }
+  const resp = document.getElementById("respline");
+  resp.classList.toggle("show", !!step.resp);
+}
+
+function renderCode(step){
+  document.getElementById("code-file").textContent = step.file;
+  const pre = document.getElementById("code");
+  pre.innerHTML = step.code.map((line,idx)=>{
+    const hot = step.hot && step.hot.includes(idx) ? " hot" : "";
+    return `<span class="ln${hot}">${highlight(line)||"&nbsp;"}</span>`;
+  }).join("");
+}
+
+function renderCtx(step){
+  const c = step.ctx;
+  const block = c.blockKeys||[];
+  const ok = c.okKeys||[];
+  const rows = [
+    ["phase", c.phase],
+    ["authorization", c.auth],
+    ["input", c.input],
+    ["business logic", c.logic],
+    ["response", c.response],
+  ];
+  const keymap = {phase:"phase",authorization:"auth","input":"input","business logic":"logic","response":"response"};
+  document.getElementById("ctx").innerHTML = rows.map(([k,v])=>{
+    const key = keymap[k];
+    let cls = "wait";
+    if(block.includes(key)) cls = "block";
+    else if(ok.includes(key)) cls = "ok";
+    else if(v && v!=="—" && v!=="…" ) cls = "";
+    return `<div class="row"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
+  }).join("");
+}
+
+function render(){
+  const step = steps[i];
+  renderStage(step);
+  renderCode(step);
+  renderCtx(step);
+  document.getElementById("exp").innerHTML = step.exp;
+  document.getElementById("sec-tag").innerHTML = step.secTag;
+  document.getElementById("sec").innerHTML = step.sec;
+  document.getElementById("cite").innerHTML = step.cite;
+  document.getElementById("cur").textContent = i+1;
+
+  document.querySelectorAll(".dot").forEach((d,idx)=>{
+    d.classList.toggle("active", idx===i);
+    d.classList.toggle("done", idx<i);
+  });
+
+  document.getElementById("back").disabled = i===0;
+  document.getElementById("next").disabled = i===steps.length-1;
+}
+
+function next(){ if(i<steps.length-1){ i++; render(); } else stopPlay(); }
+function back(){ if(i>0){ i--; render(); } }
+
+function startPlay(){
+  playing=true;
+  document.getElementById("play").innerHTML="&#10073;&#10073; Pause";
+  timer=setInterval(()=>{ if(i>=steps.length-1){ stopPlay(); } else next(); }, 5200);
+}
+function stopPlay(){
+  playing=false;
+  document.getElementById("play").innerHTML="&#9654; Play";
+  if(timer){ clearInterval(timer); timer=null; }
+}
+
+document.getElementById("next").addEventListener("click",()=>{ stopPlay(); next(); });
+document.getElementById("back").addEventListener("click",()=>{ stopPlay(); back(); });
+document.getElementById("play").addEventListener("click",()=>{ playing?stopPlay():startPlay(); });
+document.addEventListener("keydown",(e)=>{
+  if(e.key==="ArrowRight"){ stopPlay(); next(); }
+  if(e.key==="ArrowLeft"){ stopPlay(); back(); }
+});
+
+buildStage();
+buildRail();
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>useCallbackRef — deep dive</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 24px 26px; min-height: 280px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 12px 14px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 13px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 11.5px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .chips { display: flex; gap: 12px; flex-wrap: wrap; }
+  .chips .node { flex: 1; min-width: 150px; }
+
+  /* ---- code panel ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 6px 12px 0; }
+  .code-cap { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); padding: 0 0 8px 16px; }
+  .code-line {
+    display: flex; font-size: 12.5px; line-height: 1.8; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .42;
+  }
+  .code-line .ln { width: 34px; text-align: right; padding-right: 12px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; }
+
+  /* ---- live readout ---- */
+  .live { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px; }
+  .live h4 { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--warn); margin-bottom: 10px; }
+  .lv-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .lv-row:last-of-type { border-bottom: none; }
+  .lv-label { color: var(--ink-dim); font-size: 12.5px; }
+  .lv-val { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; font-weight: 700; }
+  .lv-val.g { color: var(--good); } .lv-val.b { color: var(--bad); } .lv-val.d { color: #5a5f85; }
+  .lv-cap { color: var(--ink-dim); font-size: 12px; margin-top: 10px; font-style: italic; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body b { color: var(--ink); }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">react internals · your codebase</div>
+  <h1>useCallbackRef: one callback that is both permanent and never out of date</h1>
+  <p class="sub">Eight lines in <code>shared/lib/use-callback-ref.ts</code> resolve a real contradiction in React.
+  This page builds the idea from zero — renders, closures, identity — then shows exactly why your auto-scroll
+  feature would break without it. Step through with Next / arrow keys.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+  <div class="chips">
+    <div class="node" id="concept-render"><div class="n-title">Re-render</div><div class="n-desc">React re-runs your component function</div></div>
+    <div class="node" id="concept-closure"><div class="n-title">Closure</div><div class="n-desc">a function remembers the values around its birth</div></div>
+    <div class="node" id="concept-identity"><div class="n-title">Identity</div><div class="n-desc">same code ≠ same object in memory</div></div>
+  </div>
+
+  <div class="code-panel" id="code-hook"></div>
+  <div class="code-panel" id="code-usage" style="display:none;"></div>
+
+  <div class="live" id="live">
+    <h4>Live model — what happens as the component re-renders</h4>
+    <div class="lv-row"><span class="lv-label">Renders so far</span><span class="lv-val" id="lv-renders">—</span></div>
+    <div class="lv-row"><span class="lv-label">Latest <code>fn</code> you'd want to call</span><span class="lv-val" id="lv-latest">—</span></div>
+    <div class="lv-row"><span class="lv-label">What the returned callback actually calls</span><span class="lv-val" id="lv-calls">—</span></div>
+    <div class="lv-row"><span class="lv-label">Identity of the returned callback</span><span class="lv-val" id="lv-wrapper">—</span></div>
+    <div class="lv-cap" id="lv-cap">&nbsp;</div>
+  </div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ Key idea</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ▶ Play auto-advances</p>
+
+<script>
+/* ── syntax highlighter ──────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","extends"]);
+const FN = new Set(["useState","useRef","useCallback","useEffect","useInsertionEffect","useCallbackRef",
+  "Promise","console","Map","Set","Array","Object","JSON","addEventListener","removeEventListener","scrollTo"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+= KW.has(m[3])?'<span class="c-kw">'+m[3]+'</span>'
+                     : FN.has(m[3])?'<span class="c-fn">'+m[3]+'</span>': esc(m[3]);
+    else out+=esc(m[4]);
+  }
+  return out;
+}
+/* build a code panel with a caption, an id prefix, and a starting display line number */
+function buildCodeP(targetId, caption, codeText, prefix, startNo){
+  const el = document.getElementById(targetId);
+  const cap = document.createElement("div"); cap.className="code-cap"; cap.textContent=caption; el.appendChild(cap);
+  codeText.split("\n").forEach((line,idx)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id=prefix+(idx+1);
+    row.innerHTML='<span class="ln">'+(startNo+idx)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+const HOOK = `import { useCallback, useInsertionEffect, useRef } from "react";
+
+export function useCallbackRef<A extends unknown[], R>(
+  fn: (...args: A) => R,
+): (...args: A) => R {
+  const ref = useRef(fn);
+  useInsertionEffect(() => {
+    ref.current = fn;
+  });
+  return useCallback((...args: A) => ref.current(...args), []);
+}`;
+
+const USAGE = `const onScroll = useCallbackRef(() => {
+  const el = ref.current;
+  if (!el) return;
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+  setPinned(distance < 80);
+});
+
+useEffect(() => {
+  const el = ref.current;
+  if (!el) return;
+  el.addEventListener("scroll", onScroll, { passive: true });
+  return () => el.removeEventListener("scroll", onScroll);
+}, [onScroll]);`;
+
+buildCodeP("code-hook", "shared/lib/use-callback-ref.ts", HOOK, "H", 1);
+buildCodeP("code-usage", "features/chat/hooks/useAutoScroll.ts", USAGE, "U", 15);
+
+/* ════ steps ════ */
+const steps = [
+  {
+    title: "The contradiction this hook solves",
+    active: [],
+    text: "A React component re-runs constantly. Sometimes you need a callback that two things are both true of at once: its <b>identity never changes</b> (so it can be a long-lived event listener that's set up only once), yet it <b>always runs the newest version of your logic</b> (so it never acts on stale data). Plain React tools give you one or the other — never both. <code>useCallbackRef</code> is the 8-line trick that gives you both.",
+    model: { renders: "—", latest: "—", calls: "—", wrapper: "—", cap: "Keep this tension in mind — every step below is building toward it." },
+    sec: { head: "★ The one-liner", body: "<b>Stable on the outside, fresh on the inside.</b> The thing you hand out never changes; what it does is always up to date." }
+  },
+  {
+    title: "What a “render” actually is",
+    active: ["concept-render"],
+    text: "A React component is just a function. React calls it again — a <b>render</b> — every time its state or props change. Each call runs the function body top to bottom from scratch, which means <b>every variable and every function written inside it is created brand new on that pass</b>. The old ones are thrown away. So a component that re-renders 30 times has created 30 separate copies of each inner function.",
+    model: { renders: 1, latest: "handler v1", calls: "—", wrapper: "—", cap: "Render #1: one fresh handler function created." },
+    sec: { head: "★ Define", body: "<b>Render</b> = one execution of your component function. Not a paint to the screen — just React running your code again to figure out what the UI should be." }
+  },
+  {
+    title: "What a “closure” is",
+    active: ["concept-closure"],
+    text: "When a function is created <i>inside</i> another function, it <b>captures</b> the variables that were in scope at that moment, and keeps reading them for as long as that function lives. That captured bundle is a <b>closure</b>. So each render's inner functions don't share data — each one closes over the <i>specific values from the render that created it</i>. Render #1's handler sees render #1's state; render #2's handler sees render #2's state.",
+    model: { renders: 2, latest: "handler v2", calls: "—", wrapper: "—", cap: "Render #2 made handler v2 — it closes over the newer state." },
+    sec: { head: "★ Define", body: "<b>Closure</b> = a function plus the snapshot of surrounding variables it remembers. Same source code, different render → different captured values." }
+  },
+  {
+    title: "Problem A — the stale closure",
+    tag: { kind: "bad", label: "trap" },
+    active: ["concept-closure"],
+    text: "Here's the danger. Suppose you grab a handler from render #1 and <b>hold onto it</b> — say you hand it to <code>addEventListener</code> once and never replace it. The component keeps re-rendering, state keeps changing… but that frozen handler still closes over render #1's values <b>forever</b>. It calls <code>setPinned</code> with data that's ten renders out of date. That bug is a <b>stale closure</b>: live code, dead data.",
+    model: { renders: 5, latest: "handler v5", calls: "handler v1", wrapper: "frozen", bad: ["calls"], cap: "5 renders in, but the held handler is still v1 — it reads ancient state." },
+    sec: { head: "⚠ Gotcha", body: "Stale closures are one of the top sources of “why is my React value wrong?” bugs. The fix can't be “just freeze the function” — freezing is what <i>causes</i> it." }
+  },
+  {
+    title: "What “identity” means for a function",
+    active: ["concept-identity"],
+    text: "Two functions can have <b>identical source code and still be different objects</b> in memory. <code>(() => 1) === (() => 1)</code> is <code>false</code>. JavaScript compares functions by <b>reference identity</b> — are these literally the same object? — not by what they do. Since every render creates fresh functions, the “same” handler has a <b>new identity on every single render</b>.",
+    model: { renders: 3, latest: "handler v3", calls: "—", wrapper: "new each render", bad: ["wrapper"], cap: "Same code, but render #3's handler is a different object than #2's." },
+    sec: { head: "★ Define", body: "<b>Referential identity</b> = the <code>===</code> answer: do two names point at the exact same object? React leans on this everywhere." }
+  },
+  {
+    title: "Why identity matters — dependency arrays",
+    active: ["concept-identity"],
+    text: "<code>useEffect(setup, [deps])</code> is React's “do a side effect” tool — things like attaching an event listener. React decides whether to <b>re-run</b> the setup by comparing each value in the <code>[deps]</code> array against last render's, using identity (<code>===</code>). If a dependency is a function that's freshly created every render, React sees a new identity every time and concludes “this changed — tear down and redo the effect.” Every render. ",
+    model: { renders: 4, latest: "handler v4", calls: "handler v4", wrapper: "new each render", bad: ["wrapper"], cap: "New identity each render → React thinks the dependency changed → effect re-runs." },
+    sec: { head: "★ Define", body: "<b>Dependency array</b> = the list that tells an effect/memo “re-run only when one of these changes.” Identity is how “changes” is judged." }
+  },
+  {
+    title: "Problem B — the re-subscription churn",
+    tag: { kind: "bad", label: "cost" },
+    active: ["U11", "U12"],
+    text: "Concretely, in an effect that does <code>addEventListener</code> on the way in and <code>removeEventListener</code> on cleanup: if its dependency identity changes every render, then <b>every render rips the scroll listener off the DOM and bolts a new one on</b>. That's wasted work, and worse — there's a tiny gap between remove and re-add where a scroll event can slip through unhandled. So an inline function is always-fresh but causes churn.",
+    model: { renders: 4, latest: "handler v4", calls: "handler v4", wrapper: "new each render", bad: ["wrapper"], cap: "remove → add, remove → add… on every render. Death by a thousand re-subscriptions." },
+    sec: { head: "⚠ Gotcha", body: "This is invisible until the component renders <i>fast</i> — like a chat panel streaming tokens. Then it churns dozens of times a second." }
+  },
+  {
+    title: "The dilemma, stated plainly",
+    tag: { kind: "bad", label: "pick one?" },
+    active: [],
+    text: "So you're stuck between two bad options. <b>Inline function</b>: always the latest logic ✓, but new identity every render → effect churn ✗. <b>useCallback(fn, [])</b> (React's tool to freeze a function's identity): stable identity ✓, but it freezes render #1's closure → stale data ✗. It looks like you must sacrifice one. <code>useCallbackRef</code> refuses to choose — and the next three tools are how.",
+    model: { renders: "—", latest: "—", calls: "—", wrapper: "—", cap: "Freshness vs. stability. The hook's whole job is to deny that this is a real trade-off." },
+    sec: { head: "★ Reframe", body: "The trick: stop trying to make <i>one</i> object be both stable and fresh. Split the roles — a stable <b>wrapper</b> that forwards to a fresh <b>target</b>." }
+  },
+  {
+    title: "Tool 1 — useRef, a box that survives renders",
+    active: ["H6"],
+    text: "<code>useRef(initial)</code> returns a small object that looks like <code>{ current: ... }</code>. Two properties make it special: React keeps it the <b>same object across every render</b> (it isn't recreated like normal variables), and writing to <code>.current</code> <b>does not trigger a re-render</b>. Think of it as a stable mailbox the component can keep stuffing the latest value into. Line H6 creates one, pre-loaded with the first <code>fn</code>.",
+    model: { renders: 1, latest: "handler v1", calls: "—", wrapper: "—", good: ["latest"], cap: "ref.current = handler v1. The box exists; the wrapper doesn't read it yet." },
+    sec: { head: "★ Define", body: "<b>useRef</b> = a persistent, mutable container that lives across renders without causing them. Perfect for “always hold the newest X.”" }
+  },
+  {
+    title: "Tool 2 — useCallback with an empty deps array",
+    active: ["H10"],
+    text: "<code>useCallback(fn, deps)</code> <b>memoizes</b> a function — “memoize” meaning cache it and hand back the <b>same object</b> on later renders, as long as <code>deps</code> haven't changed by identity. The key move on line H10 is the <code>[]</code>: an empty dependency list means “nothing can ever change,” so React returns the <b>exact same wrapper function for the entire life of the component</b>. One stable identity, guaranteed.",
+    model: { renders: 3, latest: "handler v3", calls: "—", wrapper: "fn@stable", good: ["wrapper"], cap: "Renders climb, but useCallback([]) hands back the same wrapper object every time." },
+    sec: { head: "★ Define", body: "<b>useCallback(fn, [])</b> = “give me this exact function object forever.” Alone it would freeze the closure — here it only freezes the <i>wrapper</i>, which is safe." }
+  },
+  {
+    title: "Tool 3 — useInsertionEffect, the earliest effect",
+    active: ["H7", "H8", "H9"],
+    text: "<code>useInsertionEffect</code> is a relative of <code>useEffect</code> that React runs <b>earliest</b> — before it measures layout and before the browser paints. The hook uses it (lines H7–H9) to copy the freshest <code>fn</code> into <code>ref.current</code> on every render. Running it this early guarantees the mailbox holds the latest logic <i>before</i> any code could possibly call the wrapper and read it.",
+    model: { renders: 2, latest: "handler v2", calls: "—", wrapper: "fn@stable", good: ["latest"], cap: "Each render, the insertion effect refreshes ref.current → newest fn, ahead of everything." },
+    sec: { head: "★ Define", body: "<b>useInsertionEffect</b> = like useEffect but fires first in the commit. Used here purely for timing: update the box before anyone reads it." }
+  },
+  {
+    title: "Putting the three together — line by line",
+    active: ["H6", "H7", "H8", "H9", "H10"],
+    text: "Now read the body as one move. <b>H6</b>: a stable box holds <code>fn</code>. <b>H7–H9</b>: every render, refresh the box to the newest <code>fn</code>. <b>H10</b>: return a wrapper whose identity is frozen by <code>[]</code>, but whose body is <code>ref.current(...args)</code> — it doesn't capture <code>fn</code> directly, it <b>reads the box at call time</b>. The wrapper is permanent; the box's contents are always current. The indirection is the whole trick.",
+    model: { renders: 4, latest: "handler v4", calls: "handler v4", wrapper: "fn@stable", good: ["calls", "wrapper", "latest"], cap: "Stable wrapper → reads box → box holds v4. Identity frozen, behaviour fresh." },
+    sec: { head: "★ Key idea", body: "The wrapper closes over the <b>box</b> (which never changes), not over <code>fn</code> (which does). That one level of indirection dodges the stale closure entirely." }
+  },
+  {
+    title: "The payoff, side by side",
+    tag: { kind: "good", label: "both at once" },
+    active: ["H10"],
+    text: "Watch the live model. Across renders, the returned callback's <b>identity stays constant</b> (so an effect depending on it never re-runs, no listener churn) <b>and</b> the version it actually calls <b>keeps climbing to the latest</b> (so no stale data). This is the exact pair of guarantees that looked impossible back at the dilemma. You've now got a callback you can safely subscribe once and forget — that's never out of date.",
+    model: { renders: 7, latest: "handler v7", calls: "handler v7", wrapper: "fn@stable", good: ["calls", "wrapper", "latest"], cap: "Identity: unchanged ✓   Behaviour: latest ✓   The contradiction is resolved." },
+    sec: { head: "★ Say it to a senior", body: "“It hands back a referentially-stable callback that proxies through a ref to the latest closure — so effects don't re-subscribe, but calls never go stale.”" }
+  },
+  {
+    title: "The TypeScript generics, decoded",
+    active: ["H3", "H4", "H5"],
+    text: "<code>&lt;A extends unknown[], R&gt;</code> are two <b>type variables</b> — placeholders TypeScript fills in per call. <code>A</code> is “the tuple of argument types,” <code>R</code> is “the return type.” The signature says: <code>fn</code> takes args <code>A</code> and returns <code>R</code>, and the wrapper we return takes the <b>same</b> <code>A</code> and returns the same <code>R</code>. So callers get full type-checking — the wrapper looks identical to <code>fn</code> to the type system. It's pure compile-time plumbing; all of it <b>vanishes at runtime</b>.",
+    model: { renders: "—", latest: "—", calls: "—", wrapper: "—", cap: "Generics describe shapes, not behaviour. Erased when TypeScript compiles to JavaScript." },
+    sec: { head: "★ Define", body: "<b>Generic</b> = a type left blank to be filled per use, so one function stays correctly typed for any argument/return shape. <code>extends unknown[]</code> just means “A is some argument list.”" }
+  },
+  {
+    title: "Where your app actually uses it — useAutoScroll",
+    active: ["U1", "U11", "U13"],
+    showUsage: true,
+    text: "Here's the real call site (it pins the chat to the bottom as messages stream, but yields when you scroll up). Line U15 wraps the scroll handler in <code>useCallbackRef</code>, so <code>onScroll</code> has a <b>stable identity</b>. Line U27's effect lists <code>[onScroll]</code> as its only dependency — and because that identity never changes, <b>the listener is attached exactly once</b> for the component's whole life. No churn.",
+    model: { renders: 7, latest: "handler v7", calls: "handler v7", wrapper: "fn@stable", good: ["calls", "wrapper"], cap: "onScroll is stable → useEffect([onScroll]) runs its setup once, not per render." },
+    sec: { head: "★ In code", body: "Without the hook, <code>[onScroll]</code> would change every render → add/remove the scroll listener every render. With it: one <code>addEventListener</code>, ever." }
+  },
+  {
+    title: "…and why the handler still sees fresh state",
+    tag: { kind: "good", label: "no stale bug" },
+    active: ["U2", "U5"],
+    showUsage: true,
+    text: "The listener is attached once — yet the body still reads the latest <code>ref.current</code> and calls the latest <code>setPinned</code>, because <code>useCallbackRef</code> kept refreshing the box. If they'd frozen the handler with a plain <code>useCallback([])</code> instead, the listener would also attach once, but it'd be a <b>stale closure</b> — computing scroll distance against a stale element reference. The hook gives the “attach once” win <i>without</i> that bug.",
+    model: { renders: 9, latest: "handler v9", calls: "handler v9", wrapper: "fn@stable", good: ["calls", "wrapper", "latest"], cap: "Attached once (U25) + always-latest body (U16–U20) = correct pinning, zero churn." },
+    sec: { head: "★ Pair-teaching line", body: "“The effect depends on a stable <code>onScroll</code>, so it subscribes once; the ref indirection keeps the handler's guts current. Stability and freshness, decoupled.”" }
+  },
+  {
+    title: "Why this exact spot demanded it",
+    tag: { kind: "good", label: "the point" },
+    active: ["U11", "U12"],
+    showUsage: true,
+    text: "The chat panel re-renders <b>many times per second</b> while tokens stream in. With a plain inline <code>onScroll</code>, the effect would detach and reattach the scroll listener on every one of those renders — burning work and risking dropped scroll events mid-stream, exactly when smooth auto-scroll matters most. <code>useCallbackRef</code> is the reason the listener stays put through the whole stream. That's not premature optimization here; the render rate makes it necessary.",
+    model: { renders: 30, latest: "handler v30", calls: "handler v30", wrapper: "fn@stable", good: ["calls", "wrapper", "latest"], cap: "30 renders during a stream → still 1 listener. Without the hook: 30 detach/reattach cycles." },
+    sec: { head: "★ When to reach for it", body: "Any time a frequently-changing callback feeds a dependency array — event listeners, subscriptions, timers, observers. It's the same pattern React's own <code>useEffectEvent</code> proposal formalizes." }
+  },
+  {
+    title: "Recap — answers to the obvious questions",
+    active: [],
+    text: "You can now run the gauntlet. <b>What's useCallback?</b> Caches a function's identity across renders; <code>[]</code> = forever. <b>Drawback alone?</b> It freezes the closure → stale data. <b>What's useRef?</b> A persistent mutable box that doesn't trigger renders. <b>Why both?</b> The stable wrapper (useCallback) forwards through the box (useRef) to the latest logic — stable identity, fresh behaviour. <b>Why useInsertionEffect?</b> To refresh the box before anything reads it. <b>Why in useAutoScroll?</b> So the streaming chat attaches its scroll listener once instead of thrashing every render.",
+    model: { renders: "—", latest: "—", calls: "—", wrapper: "—", cap: "It's no longer a black box. You can defend every line — and teach it." },
+    sec: { head: "★ The whole thing in one breath", body: "<b>Stable on the outside (useCallback []), fresh on the inside (useRef + useInsertionEffect)</b> — so effects subscribe once and callbacks never go stale." }
+  }
+];
+
+function setVal(id, val, flavor){
+  const el = document.getElementById(id);
+  el.textContent = val;
+  el.className = "lv-val" + (flavor ? " " + flavor : "");
+}
+function renderStage(step){
+  document.getElementById("code-usage").style.display = step.showUsage ? "" : "none";
+  const m = step.model || {};
+  const good = m.good || [], bad = m.bad || [];
+  const flav = (key, base) => bad.includes(key) ? "b" : good.includes(key) ? "g" : (base || "d");
+  setVal("lv-renders", m.renders ?? "—", typeof m.renders === "number" ? "" : "d");
+  setVal("lv-latest", m.latest ?? "—", flav("latest", typeof m.latest === "string" && m.latest !== "—" ? "" : "d"));
+  setVal("lv-calls", m.calls ?? "—", flav("calls"));
+  setVal("lv-wrapper", m.wrapper ?? "—", flav("wrapper"));
+  document.getElementById("lv-cap").innerHTML = m.cap || "&nbsp;";
+}
+
+/* ── stepper engine ── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? (s.tag.kind === "good" ? "good" : "bad") : "";
+  document.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  const sec = document.getElementById("step-secondary");
+  const secData = s.sec;
+  document.getElementById("sec-head").textContent = secData ? secData.head : "★ Key idea";
+  sec.className = secData ? "secondary-body" : "secondary-none";
+  sec.innerHTML = secData ? secData.body : "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>
