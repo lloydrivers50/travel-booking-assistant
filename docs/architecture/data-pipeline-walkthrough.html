@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PDF Policy Ingestion — Pipeline Walkthrough</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 80px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 18px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 820px; }
+
+  /* ---- mini-map of the whole pipeline ---- */
+  .minimap {
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+    padding: 10px 12px; margin: 16px 0 4px;
+  }
+  .mm-step {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+    color: var(--ink-dim); padding: 5px 9px; border-radius: 7px;
+    border: 1px solid transparent; white-space: nowrap; transition: all .2s;
+  }
+  .mm-step.active {
+    color: var(--ink); background: var(--panel-2);
+    border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent);
+  }
+  .mm-step.done { color: #6f7398; }
+  .mm-arrow { color: #3a3e60; font-size: 11px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 18px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  button.ghost { background: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 26px 30px; min-height: 250px;
+  }
+  .stage-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .stage-title { font-size: 20px; font-weight: 700; }
+  .stage-where { color: var(--ink-dim); font-size: 12px; }
+
+  /* input -> transform -> output visual */
+  .flow { display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap; margin-top: 18px; }
+  .flow-col { flex: 1; min-width: 220px; display: flex; flex-direction: column; }
+  .flow-label {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-dim); font-weight: 700; margin-bottom: 6px;
+  }
+  .box {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; flex: 1; font-size: 13px;
+  }
+  .box.in { border-left: 3px solid var(--warn); }
+  .box.out { border-left: 3px solid var(--good); }
+  .box .b-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+  .box pre { white-space: pre-wrap; font-size: 12px; color: #cdd2ee; line-height: 1.5; }
+  .arrow {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent); font-size: 22px; font-weight: 700; min-width: 36px;
+  }
+  .arrow .a-lbl { font-size: 10px; color: var(--ink-dim); writing-mode: horizontal-tb; }
+  .arrow-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+
+  /* the running-example fact tracker pill */
+  .fact-pill {
+    display: inline-block; margin-top: 14px; font-size: 11.5px;
+    background: rgba(139,155,255,.10); border: 1px solid var(--accent);
+    color: var(--ink); border-radius: 999px; padding: 5px 12px;
+  }
+  .fact-pill b { color: var(--accent); }
+
+  /* ---- code panel ---- */
+  .code-wrap { margin-top: 18px; }
+  .code-cap {
+    display: flex; align-items: center; gap: 8px; font-size: 11px;
+    color: var(--ink-dim); margin-bottom: 6px;
+  }
+  .net-tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .net-tag.http { background: rgba(246,182,87,.16); color: var(--warn); }
+  .net-tag.local { background: rgba(92,211,164,.16); color: var(--good); }
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; overflow-x: auto; }
+  .code-line {
+    display: flex; font-size: 12.5px; line-height: 1.75; white-space: pre;
+  }
+  .code-line .ln { width: 34px; text-align: right; padding-right: 12px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; }
+  .c-num { color: #f6b657; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-text { color: var(--ink); }
+  .step-text p + p { margin-top: 8px; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  /* ---- jargon chips ---- */
+  .jargon {
+    border-bottom: 1.5px dotted var(--accent); cursor: help; color: #cdd2ee;
+  }
+  .jargon:hover { color: #fff; }
+  .popover {
+    position: fixed; z-index: 50; max-width: 320px;
+    background: #0b0c14; border: 1px solid var(--accent); border-radius: 10px;
+    padding: 12px 14px; font-size: 12.5px; line-height: 1.5; color: var(--ink);
+    box-shadow: 0 12px 40px -8px rgba(0,0,0,.7); display: none;
+  }
+  .popover .pop-term { font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+
+  /* ---- explain-it-back checkpoint ---- */
+  .checkpoint {
+    margin-top: 18px; background: rgba(246,182,87,.07);
+    border: 1px solid var(--warn); border-radius: var(--radius); padding: 18px 20px;
+  }
+  .checkpoint .cp-q { font-weight: 700; color: var(--warn); }
+  .checkpoint .cp-q::before { content: "✦ Explain it back  "; font-size: 11px; letter-spacing: .06em; }
+  .checkpoint .cp-a {
+    margin-top: 12px; display: none; color: var(--ink);
+    background: var(--panel-2); border-radius: 9px; padding: 12px 14px; font-size: 13.5px;
+  }
+  .checkpoint button { margin-top: 12px; }
+
+  /* ---- glossary modal ---- */
+  .glossary-btn { position: fixed; top: 18px; right: 18px; z-index: 40; }
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(8,9,15,.75); z-index: 60;
+    display: none; align-items: flex-start; justify-content: center; padding: 60px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    max-width: 720px; width: 100%; padding: 26px 28px;
+  }
+  .modal h2 { font-size: 18px; margin-bottom: 14px; }
+  .modal .g-row { padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .modal .g-term { font-weight: 700; color: var(--accent); }
+  .modal .modal-close { float: right; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 18px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<button class="glossary-btn ghost" id="glossaryBtn">📖 Glossary</button>
+
+<header>
+  <div class="eyebrow">travel assistant · DECIDE half · data pipeline</div>
+  <h1>How a policy PDF becomes an enforceable rule</h1>
+  <p class="sub">One travel-policy PDF becomes <b>two synchronized representations</b>: one the LLM can
+  <i>explain</i> (RAG), one deterministic code can <i>enforce</i> (the policy engine). We follow one fact —
+  <b>France €60</b> per diem and the <b>£180 London hotel cap</b> — all the way through. Dotted-underlined
+  words are clickable: tap any to unpack the jargon. Step through one stage at a time.</p>
+</header>
+
+<div class="minimap" id="minimap"></div>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter">Step <span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+  <div class="stage-head">
+    <span class="stage-title" id="stage-title"></span>
+    <span class="stage-where" id="stage-where"></span>
+  </div>
+  <div id="stage-body"></div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What just happened</h3>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ Why it matters</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · click any dotted word for its definition</p>
+
+<div class="popover" id="popover"></div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <button class="ghost modal-close" id="modalClose">✕ Close</button>
+    <h2>Glossary — every term, plain English</h2>
+    <div id="glossaryList"></div>
+  </div>
+</div>
+
+<script>
+/* ════ syntax highlighter ════════════════════════════════════════════════ */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","type","interface","enum","switch","case","default","public","private"]);
+const FN = new Set(["Worker","Queue","Promise","console","Map","Set","Array","Object","JSON","prisma","openai","fetch"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\d+(?:\.\d+)?)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function codeBlock(codeText){
+  let html = '<div class="code-panel">';
+  codeText.split("\n").forEach((line,idx)=>{
+    html+='<div class="code-line"><span class="ln">'+(idx+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span></div>';
+  });
+  return html+'</div>';
+}
+
+/* ════ jargon definitions (verbatim from spec) ═══════════════════════════ */
+const GLOSSARY = {
+  "OCR": "Optical Character Recognition: software reading a picture of text and turning it into actual characters. A PDF page is often just an image; OCR turns the image of “£50” into the digits 50.",
+  "glyph": "One printed character as a shape (the picture of “5”, not the number 5). OCR's job is glyph → character.",
+  "bbox": "Bounding box: rectangle coordinates saying WHERE on the page something sits (corner, width, height). Lets you say “this table is at the top of page 12.”",
+  "confidence": "The parser's own 0–1 score for “how sure am I that I read this right.” 0.94 = pretty sure that glyph was £50.",
+  "calibrated probability": "Whether a score like 0.71 LITERALLY means “71% likely correct.” Parser confidence is NOT calibrated — it's a rough ordering hint, not real odds. So use it only to SORT what a human reviews first; never let it auto-approve.",
+  "tuned per-parser": "Textract's 0.8 and Azure's 0.8 don't mean the same thing, so any threshold must be set per-tool.",
+  "stitching": "Tables spanning pages: one logical table runs across pages 12–14, so the parser returns three fragments; you rejoin them by matching the column headers before reading rows.",
+  "scalar": "A single plain value, like 50. Not a list, not a condition — just a number.",
+  "taxonomy": "A fixed classification scheme: the set of KINDS of rule (cap, eligibility, threshold, window, allowlist).",
+  "conditional": "A rule that depends on something (“business class ONLY IF the flight is over 6 hours”), not a flat number.",
+  "heterogeneous": "Mixed kinds (caps, time windows, approval triggers) that can't all be one row shape.",
+  "discriminated union": "Records that share a `type` tag, where the tag decides which other fields apply and which evaluator function runs.",
+  "chunk": "A slice of the document text small enough to embed and retrieve (split on section/table boundaries, not blind character windows).",
+  "embedding": "Turning text into a list of numbers (a vector) that captures its meaning, so similar meanings sit near each other.",
+  "vector": "That list of numbers representing meaning.",
+  "pgvector": "A PostgreSQL extension that stores those vectors and finds the nearest ones (semantic search) inside your normal database.",
+  "RAG": "Retrieval-Augmented Generation: fetch the most relevant chunks first, then let the LLM answer using them, so answers are grounded in the document.",
+  "HITL": "Human-In-The-Loop: a person signs off before a value can be enforced.",
+  "LangGraph": "The durable, resumable, human-in-the-loop workflow engine used for the approval gate (the same machinery as the booking-approval workflow, reused).",
+  "BullMQ": "A Redis-backed background job queue; ingestion runs here, off the request path.",
+  "Prisma": "The TypeScript database toolkit/ORM used to read & write Postgres tables.",
+  "staging": "policy_fact_staging — a holding table for PROPOSED facts the engine cannot see; nothing here is enforceable.",
+  "promote": "Moving an approved row from staging into `policy_fact`, where it becomes enforceable.",
+  "three-way diff": "On re-ingest, showing the reviewer what's added / removed / changed vs the prior version, keyed on a stable identity so a deleted rule can't slip past silently.",
+  "effective-dating": "A version carries an `effectiveFrom` date; the version in force at date D is the approved one with the greatest effectiveFrom ≤ D. Approve in June, enforced from July.",
+  "idempotent": "Re-running a crashed job must not double-write; every write updates-or-inserts (upsert) keyed on the version id, never blind-inserts.",
+  "upsert": "Update-or-insert: write that updates the matching row if it exists, otherwise inserts. Keyed on the version id so a retried job never double-writes.",
+  "provenance": "Where a fact came from: version, page, the exact source span, and who reviewed it.",
+  "precedence": "Most-specific-scope-wins — when two rules overlap (a general £120 cap and a London £180 exception), the most specific scope wins.",
+  "vision model": "An LLM that reads images. Here it turns an approval flowchart/diagram into prose — ONLY on the explain path, never on the enforce path.",
+  "managed parser": "A hosted HTTP service (AWS Textract, Azure Document Intelligence, LlamaParse) that takes a PDF and returns layout, tables, and per-cell confidence. No Python in your repo."
+};
+/* aliases so several surface spellings resolve to one entry */
+const ALIAS = { "embed":"embedding", "OCR'd":"OCR", "vectors":"vector", "chunks":"chunk", "chunk → embed":"chunk", "calibrated":"calibrated probability", "Textract":"managed parser", "Azure DI":"managed parser" };
+
+function jx(term, label){
+  const key = ALIAS[term] || term;
+  const text = label || term;
+  return '<span class="jargon" data-term="'+key+'">'+text+'</span>';
+}
+
+/* ════ pipeline mini-map ═════════════════════════════════════════════════ */
+const MAP = ["Premise","Upload","Parse once","Branch","RAG","Taxonomy","Extract","Stage","HITL gate","Promote","Enforce","Versioning","Recap"];
+
+/* ════ the steps ═════════════════════════════════════════════════════════ */
+const steps = [
+{ /* 0 */
+  map: 0, title: "The premise & the one rule",
+  where: "§0–§1 · why this design exists",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">The assumption that unlocks everything (§0)</div>
+        <div class="box in"><div class="b-title">Low-volume · offline · accuracy-critical</div>
+        A company uploads its policy maybe once, updates it a few times a year. Nobody waits on a response.
+        So we can afford a slow accurate parser, a human can review every version cheaply, and a misread digit
+        is unacceptable — speed is worthless if the number is wrong.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div></div>
+      <div class="flow-col"><div class="flow-label">The core rule (§1)</div>
+        <div class="box out"><div class="b-title">LLM decides · code does</div>
+        The LLM extracts and explains. Deterministic code enforces and books. The LLM
+        <b>never sets a limit</b>. A parser writing <code>per_diem = £50</code> straight into the enforcement
+        table <i>is</i> the LLM setting a limit — so the structured path has a hard gate:
+        <b>propose → ${jx("HITL","human approves")} → enforce</b>.</div></div>
+    </div>
+    <div class="fact-pill">We will carry one fact: <b>France €60</b> per diem (from a table) and the <b>£180 London hotel cap</b> (for scope/precedence).</div>`,
+  text: `<p>This is the whole point. A bad RAG answer gets re-reasoned at query time; a bad <i>enforced</i> number is wrong <b>confidently and forever</b>. So extraction is never trusted on its own.</p>
+         <p>The §0 assumption (few PDFs a year) is what makes a human gate on <i>every</i> version realistic rather than a scaling nightmare.</p>`,
+  secHead: "★ Why it matters",
+  sec: `If high-volume real-time ingestion were the requirement, this design would change. It won't for this app — so the human-in-the-loop gate is affordable and correct.`
+},
+{ /* 1 */
+  map: 1, title: "Upload → file store → enqueue a job",
+  where: "§2 · off the request path",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input</div>
+        <div class="box in"><div class="b-title">policy-v4.pdf uploaded</div>
+        User uploads via the Next.js app. The file lands in object storage. The HTTP request returns immediately —
+        it does <b>not</b> wait for parsing.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">enqueue</div></div>
+      <div class="flow-col"><div class="flow-label">Output</div>
+        <div class="box out"><div class="b-title">A ${jx("BullMQ")} background job</div>
+        A job <code>{ fileKey, policyVersionId }</code> is pushed onto a Redis-backed queue. A NestJS worker
+        picks it up later. Parsing can take minutes — that's fine, nobody is waiting.</div></div>
+    </div>`,
+  code: `// NestJS service — runs in-process on the request path
+async uploadPolicy(file: Express.Multer.File) {
+  const fileKey = await this.store.put(file);        // to object storage
+  const version = await prisma.policyVersion.create({
+    data: { fileKey, status: 'ingesting' },
+  });
+  // hand off to the queue and return — do NOT parse here
+  await this.ingestQueue.add('ingest', {
+    fileKey, policyVersionId: version.id,
+  });
+  return { versionId: version.id };                  // responds instantly
+}`,
+  net: "local",
+  text: `<p>Ingestion is <b>offline</b> work, so it runs as a background job, not inside the web request. The browser gets an instant “we're working on it” and the heavy parsing happens on a worker.</p>
+         <p>This is the §0 “offline” property turned into architecture.</p>`,
+  secHead: "★ In code",
+  sec: `${jx("BullMQ")} is a ${jx("BullMQ","Redis-backed queue")} — ${jx("BullMQ","a list of jobs a separate worker process drains")}. Putting ingestion here means a slow parser never blocks a user and crashed jobs can retry.`
+},
+{ /* 2 */
+  map: 2, title: "Parse once → layout-aware elements",
+  where: "§3 · the managed parser (phones out)",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input: a page image</div>
+        <div class="box in"><div class="b-title">page 12 — a picture of a table</div>
+        The PDF page is essentially an <b>image</b>. Visually it shows:
+        <pre>Country   Rate
+UK        £50
+France    €60</pre>
+        But to the computer it's just pixels until something reads it.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">${jx("OCR")} + layout</div></div>
+      <div class="flow-col"><div class="flow-label">Output: neutral elements</div>
+        <div class="box out"><div class="b-title">structured JSON</div>
+        <pre>{ "type":"table", "page":12,
+  "confidence":0.94,
+  "cells":[["Country","Rate"],
+           ["UK","£50"],
+           ["France","€60"]] }</pre></div></div>
+    </div>
+    <div class="fact-pill"><b>France €60</b> is now an ${jx("OCR")}'d cell value — a string in JSON, with a ${jx("confidence")} score attached.</div>`,
+  code: `// In the BullMQ worker — this step PHONES OUT over HTTP
+const res = await fetch(TEXTRACT_ENDPOINT, {        // managed parser
+  method: 'POST',
+  headers: { Authorization: awsSigV4(...) },
+  body: pdfBytes,
+});
+const layout = await res.json();
+// neutral list of elements: heading | paragraph | table | figure,
+// each with page + bbox + confidence
+const elements: Element[] = layout.blocks.map(toNeutralElement);`,
+  net: "http",
+  text: `<p>We use a ${jx("managed parser","managed parsing API")} (AWS Textract or Azure Document Intelligence). It reads the image with ${jx("OCR")} — turning each ${jx("glyph")} into a real character — and recovers the table layout. Every element gets a ${jx("bbox")} and a ${jx("confidence")} score.</p>
+         <p>This step <b>phones out over HTTP</b> to a third party. It is not in-process TypeScript.</p>`,
+  secHead: "★ Gotcha",
+  sec: `That 0.94 ${jx("confidence")} is <b>OCR confidence only</b> — “how sure that glyph was €60.” It is <b>not</b> ${jx("calibrated probability","calibrated")}: 0.94 doesn't literally mean 94% correct, and it's ${jx("tuned per-parser")}. Treat it as a sort hint, never a gate. Tables can also span pages — ${jx("stitching","fragments are stitched")} on a shared header first.`
+},
+{ /* 3 */
+  map: 3, title: "Parse once, then branch twice",
+  where: "§3 · one source of truth",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">One parse pass</div>
+        <div class="box in"><div class="b-title">neutral elements (from step 2)</div>
+        We have exactly one interpretation of what the document said. We never parse the PDF twice.</div></div>
+      <div class="arrow-wrap"><div class="arrow">⇒</div><div class="a-lbl">fan out</div></div>
+      <div class="flow-col"><div class="flow-label">Two pipelines, same input</div>
+        <div class="box out"><div class="b-title">A: Explain &nbsp;|&nbsp; B: Enforce</div>
+        <b>Pipeline A (RAG)</b> turns elements into searchable text.<br>
+        <b>Pipeline B (Enforce)</b> turns elements into typed rules.<br>
+        Both read the <i>same</i> parsed elements.</div></div>
+    </div>`,
+  text: `<p>Why parse once then branch, instead of parsing separately for each pipeline? Because <b>two parses are two chances to disagree</b> about what the document said. If RAG and the engine start from different readings of page 12, they're desynced before they even begin.</p>
+         <p>One parse = one source of truth feeding both halves.</p>`,
+  secHead: "★ Why it matters",
+  sec: `The entire §7 goal is that the explain half and the enforce half can never show different policies. That starts here: they branch from one shared parse, not two independent ones.`
+},
+{ /* 4 */
+  map: 4, title: "Pipeline A — Explain (RAG)",
+  where: "§4 · chunk → embed → pgvector",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input</div>
+        <div class="box in"><div class="b-title">table element + a summary line</div>
+        <pre>"France daily allowance is €60."</pre>
+        We ${jx("embed","embed")} both the markdown table <i>and</i> a one-line plain-English summary — recall is
+        better when the chunk reads like the question a user would ask.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">${jx("embedding","embed")} (phones out)</div></div>
+      <div class="flow-col"><div class="flow-label">Output</div>
+        <div class="box out"><div class="b-title">a ${jx("pgvector")} row</div>
+        <pre>text: "France ... €60"
+embedding: [0.12, -0.04, ...]
+metadata: { page:12, section,
+  source, policyVersionId }</pre></div></div>
+    </div>`,
+  code: `// Pipeline A in the worker. The embeddings call PHONES OUT.
+const chunks = chunkStructureFirst(elements);       // split on section/table, in-process
+for (const c of chunks) {
+  const { data } = await openai.embeddings.create({  // ← HTTP to OpenAI
+    model: 'text-embedding-3-small',
+    input: c.text,
+  });
+  await prisma.$executeRaw\`
+    INSERT INTO policy_chunk (text, embedding, metadata)
+    VALUES (\${c.text}, \${toVector(data[0].embedding)}::vector,
+            \${c.metadata})\`;                        // pgvector insert (local DB)
+}`,
+  net: "http",
+  text: `<p>${jx("RAG")} is for <i>soft</i> understanding — “what does the policy say?” We ${jx("chunk","chunk")} the text on section boundaries, ${jx("embedding","embed")} each ${jx("chunk")} into a ${jx("vector")} (a list of numbers capturing meaning) via OpenAI, and store it in ${jx("pgvector")} for semantic search.</p>
+         <p>Diagrams/flowcharts are turned into prose by a ${jx("vision model")} — <b>only here</b>, never on the enforce path.</p>`,
+  secHead: "★ Gotcha",
+  sec: `Mistakes here degrade <i>answers</i>, not <i>enforcement</i>, so the bar is “good,” not “provably correct.” Note: the embeddings call is the <b>second</b> time policy text leaves your box (the parser was the first). Anthropic ships no embedding model, so embeddings are always OpenAI / Voyage / Cohere.`
+},
+{ /* 5 */
+  map: 5, title: "Pipeline B — the rule taxonomy",
+  where: "§5 · a discriminated union",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">The easy 10%</div>
+        <div class="box in"><div class="b-title">a ${jx("scalar")} lookup</div>
+        <pre>{ country: "France", rate: 60 }</pre>
+        A single number. But almost no real policy looks like this.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div></div>
+      <div class="flow-col"><div class="flow-label">The real 90%</div>
+        <div class="box out"><div class="b-title">${jx("conditional","conditional")} & ${jx("heterogeneous","heterogeneous")}</div>
+        "Business class <b>if</b> flight > 6h" · "£180 <b>in London</b>, £120 elsewhere" ·
+        "Book <b>≥14 days</b> out" · "Trips <b>over £2k</b> → director approval". None is a flat <code>claim &gt; limit</code>.</div></div>
+    </div>
+    <div class="fact-pill">Our <b>£180 London cap</b> becomes a typed row: <code>type:'cap'</code>, <code>subject:'hotel_nightly'</code>, <code>scope:{location:'London'}</code>.</div>`,
+  code: `// policy_fact stores a DISCRIMINATED UNION — a 'type' tag picks the shape.
+interface PolicyRule {
+  id: string;        // stable identity — drives the diff (§7)
+  type: 'cap' | 'eligibility' | 'threshold' | 'window' | 'allowlist';
+  subject: string;   // hotel_nightly | flight_class | booking_lead | trip_total
+  scope: object;     // { location: 'London' } | { flight_hours_gt: 6 }
+  operator: '<=' | '>=' | 'requires' | 'in';
+  value: unknown;    // scalar | range | set | { approverRole: 'director' }
+  effect: 'deny' | 'allow' | 'require_approval';
+  provenance: { versionId; page; sourceSpan; method: 'table'|'prose'; reviewedBy };
+}`,
+  net: "local",
+  text: `<p>Different operators can't share one row shape, so <code>policy_fact</code> is a ${jx("discriminated union")}: a small fixed ${jx("taxonomy")} of rule <code>type</code>s, each evaluated by its own function.</p>
+         <p>Locking this shape first closes three holes at once: extraction targets become “fill these fields,” the diff key (§7) falls out as <code>type+subject+scopeKey</code>, and the engine's operators are enumerated, not improvised.</p>`,
+  secHead: "★ Why it matters",
+  sec: `A new policy shape = a new <code>type</code> + its evaluator, not a rewrite. And it's <b>open-world</b>: a rule that fits no type becomes <code>type:'unrepresentable'</code> and routes to an engineer queue — fail loud beats force-fitting a window into a threshold.`
+},
+{ /* 6 */
+  map: 6, title: "Extraction has two sources",
+  where: "§5 · tables (easy) + prose (hard)",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Source 1: tables</div>
+        <div class="box in"><div class="b-title">${jx("managed parser")} → typed rows</div>
+        Per-cell ${jx("OCR")} ${jx("confidence")} is available as a triage hint. <b>France €60</b> comes through here.</div></div>
+      <div class="arrow-wrap"><div class="arrow">+</div></div>
+      <div class="flow-col"><div class="flow-label">Source 2: prose</div>
+        <div class="box out"><div class="b-title">LLM → proposed typed rules</div>
+        "Business class if flight > 6h" is a <i>sentence</i> — no cell, no confidence. An LLM proposes a typed rule
+        and <b>cites the exact source sentence</b> in <code>provenance.sourceSpan</code>.</div></div>
+    </div>`,
+  code: `// Prose extraction — the LLM PROPOSES, citing the source sentence.
+const proposals = await llm.extractRules({          // ← HTTP to Anthropic/OpenAI
+  paragraphs,
+  vocabulary: CONTROLLED_SUBJECTS_AND_SCOPES,       // canonicalize, or the diff key is sand
+});
+// coverage check: every paragraph yields a rule OR an explicit "no rule here"
+for (const p of paragraphs) {
+  if (!proposals.some(r => r.sourceSpan.startsWith(p.id)) && !p.markedNoRule)
+    flagForReview(p);                               // un-extracted prose is triaged too
+}`,
+  net: "http",
+  text: `<p>Tables are easy. Most enforceable rules live in <b>prose</b>, where a confidence-scoring parser gives you <i>nothing</i> (sentences have no cell confidence). So an LLM proposes typed rules, each citing its source sentence.</p>
+         <p><code>subject</code>/<code>scope</code> must come from a <b>controlled vocabulary</b>, not free LLM text — else “London”/“london”/“Greater London” drift and break the identity key.</p>`,
+  secHead: "★ Known limit",
+  sec: `The prose path's real failure is <b>omission</b>: a rule the LLM never proposes never reaches ${jx("staging")}, so the reviewer audits recall against nothing. Mitigation (not cure): a <b>coverage check</b> forces every paragraph to either yield a rule or be marked “no rule here.” Both sources are only <i>proposals</i> — nothing is trusted yet.`
+},
+{ /* 7 */
+  map: 7, title: "Stage, don't enforce",
+  where: "§5 · policy_fact_staging",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input</div>
+        <div class="box in"><div class="b-title">typed proposals (table + prose)</div>
+        Our <b>France €60</b> row and <b>£180 London cap</b> row, each with full ${jx("provenance")}.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">${jx("upsert")}</div></div>
+      <div class="flow-col"><div class="flow-label">Output</div>
+        <div class="box out"><div class="b-title">rows in <code>policy_fact_staging</code></div>
+        PROPOSALS only. <b>The enforcement engine cannot see this table.</b> It reads <code>policy_fact</code> exclusively.</div></div>
+    </div>
+    <div class="fact-pill">Even if ${jx("OCR")} had misread it as <b>€80</b>, that wrong number now sits in ${jx("staging")} — harmless, because nothing here is enforceable.</div>`,
+  code: `// Land proposals in staging — in-process Prisma writes, no enforcement.
+await prisma.policyFactStaging.upsert({             // idempotent (§7)
+  where: { versionId_identityKey: {
+    versionId, identityKey: \`\${r.type}:\${r.subject}:\${scopeKey(r.scope)}\`,
+  } },
+  create: { ...r, versionId, status: 'proposed' },
+  update: { ...r },                                 // re-run never double-writes
+});
+// NOTE: the engine has zero SQL that reads policy_fact_staging. By design.`,
+  net: "local",
+  text: `<p>${jx("Prisma","Prisma")} writes every proposal into <code>policy_fact_staging</code> — a holding table the engine <b>cannot see</b>. This is the direct answer to “what stops a misread digit from poisoning the engine?”</p>
+         <p>The digit physically cannot reach the engine. It sits as a typed proposal behind a human.</p>`,
+  secHead: "★ Why it matters",
+  sec: `This is the firewall. The trust boundary isn't “confidence > 0.9” — it's a <b>table the engine never queries</b>. Crossing into <code>policy_fact</code> requires the gate (next step).`,
+  checkpoint: {
+    q: "A misread digit is now sitting in staging. Why can it NOT poison the enforcement engine yet?",
+    a: "The engine reads <b>policy_fact only</b>; staging is invisible to it, and nothing crosses into policy_fact without a human approving at the gate."
+  }
+},
+{ /* 8 */
+  map: 8, title: "The HITL gate",
+  where: "§5 · LangGraph human review",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input</div>
+        <div class="box in"><div class="b-title">staged proposals + their source</div>
+        Reviewer sees each proposed rule <b>beside its source span</b> (the exact sentence / the page-12 cell image),
+        and on re-ingest, the ${jx("three-way diff")} (added / removed / changed).</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">${jx("HITL")} sign-off</div></div>
+      <div class="flow-col"><div class="flow-label">Output</div>
+        <div class="box out"><div class="b-title">approved (or corrected)</div>
+        A human confirms €60 is right, fixes it if not, or rejects. The ${jx("LangGraph")} workflow pauses here and
+        resumes on the human's decision — durable, resumable.</div></div>
+    </div>`,
+  code: `// LangGraph node: the workflow PAUSES until a human acts (durable, resumable)
+const reviewNode = async (state: IngestState) => {
+  const decision = await interrupt({                // suspends the graph
+    proposals: state.staged,
+    sourceSpans: state.spans,
+    diff: state.priorVersion && threeWayDiff(state.staged, state.priorVersion),
+  });
+  return { ...state, approved: decision.approvedRuleIds };
+};
+// confidence ONLY orders the queue the reviewer sees — it never approves.
+state.staged.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1));`,
+  net: "local",
+  text: `<p>${jx("HITL")} — human-in-the-loop — means a person signs off before any value is enforceable. This reuses ${jx("LangGraph")}, the same durable workflow engine as the booking-approval flow.</p>
+         <p>Crucially, ${jx("confidence")} is only a <b>queue-sorter</b>: it puts the shakiest OCR cells in front of the reviewer first. It never decides what skips review.</p>`,
+  secHead: "★ Gotcha",
+  sec: `Confidence catches <i>table-OCR</i> noise only. It says nothing about whether the LLM mapped the right column to “currency” (a semantic error, no score) and nothing about prose. Two different errors hid under one 0.71. The control is the human gate + §0 low volume — <b>every rule of every new version is reviewed</b>.`,
+  checkpoint: {
+    q: "Confidence said 0.97 for this cell. Is that enough to skip human review?",
+    a: "No — confidence only triages OCR uncertainty and isn't <b>calibrated</b>; it sorts the queue, it never approves. Every rule of a new version is human-reviewed."
+  }
+},
+{ /* 9 */
+  map: 9, title: "Promote → policy_fact",
+  where: "§5 · now it's enforceable",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input</div>
+        <div class="box in"><div class="b-title">approved staging rows</div>
+        The reviewer approved <b>France €60</b> and the <b>£180 London cap</b>.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">${jx("promote")}</div></div>
+      <div class="flow-col"><div class="flow-label">Output</div>
+        <div class="box out"><div class="b-title">rows in <code>policy_fact</code></div>
+        Tagged with <code>policyVersionId</code>. <b>Only now</b> can the engine see and enforce them.</div></div>
+    </div>
+    <div class="fact-pill"><b>France €60</b> has crossed the gate: PDF image → OCR'd cell → typed proposal → human-approved → enforceable row.</div>`,
+  code: `// Promote ONLY approved rows. Crosses the trust boundary into policy_fact.
+await prisma.$transaction(async (tx) => {
+  for (const ruleId of approvedRuleIds) {
+    const staged = await tx.policyFactStaging.findUniqueOrThrow({ where: { id: ruleId } });
+    await tx.policyFact.upsert({                     // now enforceable
+      where: { versionId_identityKey: { versionId, identityKey: staged.identityKey } },
+      create: { ...toFact(staged), policyVersionId: versionId },
+      update: { ...toFact(staged) },
+    });
+  }
+});`,
+  net: "local",
+  text: `<p>${jx("promote","Promotion")} copies approved rows from staging into <code>policy_fact</code>. This is the only door into the enforcement table, and a human is the only thing that opens it.</p>
+         <p>The write is an ${jx("upsert")} keyed on the version + identity key, so a crashed-and-retried promote never double-writes.</p>`,
+  secHead: "★ Why it matters",
+  sec: `Promotion is gated on the human decision <i>and</i> on both pipelines having finished (§7) — a half-built version (embedded but not extracted) can never be activated.`
+},
+{ /* 10 */
+  map: 10, title: "Enforce — engine reads rows only",
+  where: "§5 · one evaluator per type + precedence",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input: a claim</div>
+        <div class="box in"><div class="b-title">London hotel, £150/night</div>
+        It matches <b>two</b> overlapping rules: the general <code>£120 elsewhere</code> cap and the
+        <code>£180 London</code> exception.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">${jx("precedence")}</div></div>
+      <div class="flow-col"><div class="flow-label">Output: a decision</div>
+        <div class="box out"><div class="b-title">ALLOW (cap £180)</div>
+        Most-specific-scope-wins: <code>{location:'London'}</code> beats the unscoped default, so £180 applies.
+        £150 ≤ £180 → allowed.</div></div>
+    </div>`,
+  code: `// One evaluator per 'type', dispatched on the tag. Reads policy_fact ONLY.
+const rules = await prisma.policyFact.findMany({ where: { policyVersionId } });
+const matching = rules.filter(r => scopeMatches(r.scope, claim));
+// precedence: most-specific scope wins
+const winner = matching.sort(bySpecificity)[0];
+switch (winner.type) {
+  case 'cap':         return claim.value <= winner.value ? allow() : deny();
+  case 'eligibility': return winner.scope.flight_hours_gt < claim.hours ? allow() : deny();
+  case 'threshold':   return claim.total > winner.value ? requireApproval() : allow();
+  // ... one branch per type, exhaustive
+}`,
+  net: "local",
+  text: `<p>The engine reads <code>policy_fact</code> rows <b>only</b> — never vectors, never staging. It dispatches on the <code>type</code> tag to one evaluator per rule kind: deterministic, exhaustive, extensible.</p>
+         <p>When rules overlap, ${jx("precedence")} (most-specific-scope-wins) resolves them. A promote-time consistency check rejects truly ambiguous sets (same type, same specificity, different value).</p>`,
+  secHead: "★ Why it matters",
+  sec: `Per-type dispatch evaluates a <i>single</i> rule; it does not resolve <i>competing</i> rules. Real policy is rule-plus-exception, so precedence is a correctness requirement, not a footnote.`,
+  checkpoint: {
+    q: "A London hotel claim matches both “£120 elsewhere” and “£180 London”. Which wins and why?",
+    a: "£180 — <b>most-specific-scope-wins</b>. The London-scoped rule is more specific than the unscoped default, so it takes precedence."
+  }
+},
+{ /* 11 */
+  map: 11, title: "Versioning, effective-dating & audit",
+  where: "§7 · the desync killers",
+  body: ()=>`
+    <div class="flow">
+      <div class="flow-col"><div class="flow-label">Input</div>
+        <div class="box in"><div class="b-title">re-ingest in June → v4</div>
+        v4 builds fully in the background (new vectors + new staged facts) while <b>v3 keeps serving</b>.
+        v4 carries <code>effectiveFrom = July 1</code>.</div></div>
+      <div class="arrow-wrap"><div class="arrow">→</div><div class="a-lbl">resolve by date D</div></div>
+      <div class="flow-col"><div class="flow-label">Output</div>
+        <div class="box out"><div class="b-title">version in force at date D</div>
+        = the approved version with the greatest <code>effectiveFrom ≤ D</code>. <b>D = travel date.</b>
+        The booking pins <code>evaluatedPolicyVersionId</code>.</div></div>
+    </div>`,
+  code: `// Effective-dating: computed, never stored/mutated (keeps old versions immutable)
+function versionInForce(versions: PolicyVersion[], D: Date) {
+  return versions
+    .filter(v => v.status === 'active' && v.effectiveFrom <= D)
+    .sort((a, b) => +b.effectiveFrom - +a.effectiveFrom)[0];   // greatest effectiveFrom ≤ D
+}
+// the booking persists what was used — this IS the audit mechanism
+await prisma.booking.update({
+  where: { id }, data: { evaluatedPolicyVersionId: version.id, firedRuleIds },
+});`,
+  net: "local",
+  text: `<p>Every vector and every <code>policy_fact</code> row carries one <code>policyVersionId</code>. ${jx("effective-dating","Effective-dating")} computes the in-force version: greatest <code>effectiveFrom ≤ D</code>, where <b>D = travel date</b>. Approve in June, enforce from July.</p>
+         <p>Builds are ${jx("idempotent","idempotent")} (${jx("upsert")} keyed on version id) and a version is promotable only when both pipelines finished.</p>`,
+  secHead: "★ Why it matters",
+  sec: `The ${jx("three-way diff")} catches <b>deletion-by-omission</b> — a rule present before, gone now — the one thing a diff exists for. Audit lives on the booking: “what was enforced for this trip?” is answerable only because the booking pinned its version id and fired rule ids.`,
+  checkpoint: {
+    q: "It's June. A user asks RAG the per diem for their July trip. How do we stop RAG explaining the OLD number while the engine enforces the NEW one?",
+    a: "The <b>per-date invariant</b>: explanation also takes a date (the travel date) and resolves to the same version the engine would for that date. Every explanation is stamped with the version it answered for — so for one date, both halves agree."
+  }
+},
+{ /* 12 */
+  map: 12, title: "Recap — one fact, end to end",
+  where: "the whole journey + the two invariants",
+  body: ()=>`
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px;">
+      ${["picture of “€60” on page 12","OCR'd cell “€60”","typed proposal (staging)","human-approved","policy_fact row (enforceable)","engine allows the claim"]
+        .map((t,i,a)=>'<span class="box out" style="flex:0 1 auto; padding:8px 12px; font-size:12px;">'+(i+1)+'. '+t+'</span>'+(i<a.length-1?'<span class="arrow" style="min-width:20px;">→</span>':'')).join("")}
+    </div>
+    <div style="margin-top:22px; display:flex; gap:16px; flex-wrap:wrap;">
+      <div class="box" style="flex:1; min-width:260px; border-left:3px solid var(--good);">
+        <div class="b-title">Invariant 1</div>
+        Nothing becomes enforceable without a human. The engine reads <code>policy_fact</code> only; the only door
+        in is ${jx("promote","promotion")} after the ${jx("HITL")} gate.
+      </div>
+      <div class="box" style="flex:1; min-width:260px; border-left:3px solid var(--accent);">
+        <div class="b-title">Invariant 2</div>
+        For any given date, the two representations can never show different policies. Both halves resolve the
+        version identically for date D — the per-date invariant.
+      </div>
+    </div>`,
+  text: `<p>That's the pipeline. The same fact — <b>France €60</b> — travelled from a picture on page 12 to an enforceable rule the engine used to allow a claim, and a human signed off at exactly one gate in between.</p>
+         <p>Every adversarial attack on this design dies against one of the two invariants below.</p>`,
+  secHead: "★ The whole point",
+  sec: `The LLM <b>decided</b> (read the cell, proposed the rule, explains it in RAG). Deterministic code <b>did</b> (staged, enforced, dated, audited). And a human stood between proposal and enforcement. That separation is the entire design.`
+}
+];
+
+/* ════ render ════════════════════════════════════════════════════════════ */
+const mmWrap = document.getElementById("minimap");
+MAP.forEach((label, idx)=>{
+  if (idx>0){ const a=document.createElement("span"); a.className="mm-arrow"; a.textContent="›"; mmWrap.appendChild(a); }
+  const s=document.createElement("span"); s.className="mm-step"; s.textContent=label;
+  s.dataset.idx=idx; mmWrap.appendChild(s);
+});
+
+function renderStage(s){
+  document.getElementById("stage-title").textContent = s.title;
+  document.getElementById("stage-where").textContent = s.where;
+
+  let html = (typeof s.body === "function" ? s.body() : s.body) || "";
+  if (s.code){
+    html += '<div class="code-wrap"><div class="code-cap">'
+          + '<span class="net-tag '+(s.net==="http"?"http":"local")+'">'
+          + (s.net==="http"?"↗ phones out over HTTP":"● in-process TypeScript")+'</span>'
+          + '<span>illustrative, not copy-paste — plausible against the locked stack</span></div>'
+          + codeBlock(s.code) + '</div>';
+  }
+  if (s.checkpoint){
+    html += '<div class="checkpoint"><div class="cp-q">'+s.checkpoint.q+'</div>'
+          + '<button class="cp-reveal">Reveal answer</button>'
+          + '<div class="cp-a">'+s.checkpoint.a+'</div></div>';
+  }
+  document.getElementById("stage-body").innerHTML = html;
+
+  // wire reveal button
+  const rev = document.querySelector(".cp-reveal");
+  if (rev) rev.onclick = ()=>{ document.querySelector(".cp-a").style.display="block"; rev.disabled=true; rev.textContent="Answer shown"; };
+
+  // mini-map state
+  mmWrap.querySelectorAll(".mm-step").forEach(el=>{
+    const idx=+el.dataset.idx;
+    el.classList.toggle("active", idx===s.map);
+    el.classList.toggle("done", idx<s.map);
+  });
+}
+
+/* ════ jargon popover ════════════════════════════════════════════════════ */
+const pop = document.getElementById("popover");
+let popOpen = false;
+document.addEventListener("click", e=>{
+  const chip = e.target.closest(".jargon");
+  if (chip){
+    const term = chip.dataset.term;
+    const def = GLOSSARY[term];
+    if (def){
+      pop.innerHTML = '<div class="pop-term">'+term+'</div>'+def;
+      pop.style.display = "block";
+      const r = chip.getBoundingClientRect();
+      let left = r.left, top = r.bottom + 8;
+      const pw = Math.min(320, window.innerWidth-24);
+      if (left + pw > window.innerWidth-12) left = window.innerWidth-12-pw;
+      if (left < 12) left = 12;
+      pop.style.left = left+"px"; pop.style.top = top+"px";
+      popOpen = true;
+      e.stopPropagation();
+      return;
+    }
+  }
+  if (popOpen && !e.target.closest("#popover")){ pop.style.display="none"; popOpen=false; }
+});
+
+/* ════ glossary modal ════════════════════════════════════════════════════ */
+const modalBg = document.getElementById("modalBg");
+const gList = document.getElementById("glossaryList");
+Object.keys(GLOSSARY).sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase())).forEach(term=>{
+  const row=document.createElement("div"); row.className="g-row";
+  row.innerHTML='<span class="g-term">'+term+'</span> — '+GLOSSARY[term];
+  gList.appendChild(row);
+});
+document.getElementById("glossaryBtn").onclick = ()=>{ modalBg.style.display="flex"; };
+document.getElementById("modalClose").onclick = ()=>{ modalBg.style.display="none"; };
+modalBg.onclick = e=>{ if (e.target===modalBg) modalBg.style.display="none"; };
+
+/* ════ stepper engine ════════════════════════════════════════════════════ */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div"); d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+  document.getElementById("step-text").innerHTML = s.text;
+  document.getElementById("sec-head").textContent = s.secHead || "★ Why it matters";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.sec ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.sec || "Nothing extra on this step — keep going.";
+  renderStage(s);
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => { if (i === steps.length - 1) { stop(); return; } go(i + 1); }, 5200);
+};
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input,textarea")) return;
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+  if (e.key === "Escape") { modalBg.style.display="none"; pop.style.display="none"; popOpen=false; }
+});
+render();
+</script>
+</body>
+</html>
