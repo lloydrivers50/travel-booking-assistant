@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════
+  RAG COURSE — CHAPTER BASE TEMPLATE
+  Copy this file to chNN-*.html, then edit ONLY the AUTHOR blocks:
+    1. <head> <title>
+    2. the .chapnav prev/next links  (AUTHOR-NAV)
+    3. the header eyebrow / h1 / sub   (AUTHOR-HEAD)
+    4. the #stage markup               (AUTHOR-STAGE)
+    5. the `steps` array + renderStage() (AUTHOR-STEPS)
+  Leave the design system, the stepper engine, and the highlighter alone.
+  ════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- AUTHOR 1: title -->
+<title>Chunking — splitting documents well · RAG Course</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  /* ---- cross-chapter nav ---- */
+  .chapnav {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .chapnav a {
+    color: var(--ink-dim); text-decoration: none; padding: 6px 11px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    transition: background .15s, color .15s, border-color .15s; white-space: nowrap;
+  }
+  .chapnav a:hover { background: var(--panel-2); color: var(--ink); border-color: var(--accent); }
+  .chapnav a.map { color: var(--accent); }
+  .chapnav .spacer { flex: 1; }
+  .chapnav a.disabled { opacity: .3; pointer-events: none; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 28px 30px; min-height: 280px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .arrow { color: #4a4f72; font-size: 22px; align-self: center; }
+
+  /* ---- optional: code panel with line highlighting ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; }
+  .code-line {
+    display: flex; font-size: 13px; line-height: 1.85; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .45;
+  }
+  .code-line .ln { width: 38px; text-align: right; padding-right: 14px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; } .c-num { color: #e5a663; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.cost { background: rgba(246,182,87,.15); color: var(--warn); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+
+  /* ---- chapter-local helpers for the chunking visual (presentational only) ---- */
+  .doc {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 16px 18px; max-width: 560px; transition: opacity .25s;
+  }
+  .doc .doc-head { font-weight: 700; font-size: 13px; color: var(--accent); margin-bottom: 10px; }
+  .doc .line { height: 9px; border-radius: 4px; background: #2a2e4c; margin: 7px 0; }
+  .doc .line.short { width: 55%; }
+  .chunks { display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
+  .chunk {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 14px; font-size: 12.5px; transition: border-color .25s, box-shadow .25s, opacity .25s;
+  }
+  .chunk .c-lbl { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 4px; }
+  .chunk .c-body { color: var(--ink); }
+  .chunk.cut .c-body { color: var(--bad); }
+  .chunk.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .chunk.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .chunk .overlap { color: var(--warn); }
+  .stage-hide { opacity: .12; }
+</style>
+</head>
+<body>
+
+<!-- AUTHOR-NAV: set the three hrefs + the prev/next chapter labels. -->
+<nav class="chapnav">
+  <a class="map" href="index.html">⌂ Course map</a>
+  <span class="spacer"></span>
+  <a id="prevchap" href="ch03-vector-databases.html">‹ Prev: Vector databases</a>
+  <a id="nextchap" href="ch05-reranking.html">Next: Re-ranking ›</a>
+</nav>
+
+<!-- AUTHOR-HEAD -->
+<header>
+  <div class="eyebrow">RAG course · chapter 04 · foundations</div>
+  <h1>Chunking — splitting documents well</h1>
+  <p class="sub">You cannot embed a whole 50-page document as one vector — it blurs into mush. You split it into bite-size pieces. HOW you split decides how good retrieval is.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<!-- ════ AUTHOR-STAGE ════ -->
+<div class="stage" id="stage">
+  <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+
+    <!-- the source document -->
+    <div class="doc" id="doc">
+      <div class="doc-head">policy.pdf — Section 4: Meals</div>
+      <div class="line"></div>
+      <div class="line"></div>
+      <div class="line short"></div>
+      <div class="line"></div>
+      <div class="line"></div>
+      <div class="line short"></div>
+    </div>
+
+    <div class="arrow" id="arrow">→</div>
+
+    <!-- the resulting chunks -->
+    <div class="chunks" id="chunks">
+      <div class="chunk" id="chunk-1">
+        <div class="c-lbl">chunk 1</div>
+        <div class="c-body" id="cb-1">“…a per-day meal cap of £35 applies. Alcohol is</div>
+      </div>
+      <div class="chunk" id="chunk-2">
+        <div class="c-lbl">chunk 2</div>
+        <div class="c-body" id="cb-2">not reimbursable under any circumstances…”</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="secondary-head">★ In your travel app</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ⌂ Course map returns to the index</p>
+
+<script>
+/* ── syntax highlighter — keep ───────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","SELECT","FROM","WHERE","ORDER","BY","LIMIT","CREATE","TABLE"]);
+const FN = new Set(["useState","Promise","console","Map","Set","Array","Object","JSON","embed","search","rerank","query"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$|--.*$|#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  codeText.replace(/^\n/,"").split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* ════ AUTHOR-STEPS ════ */
+const steps = [
+  {
+    title: "The one idea",
+    active: [],
+    text: "A <b>chunk</b> is a bite-size piece of a document that gets <b>embedded</b> — turned into a vector, a list of numbers capturing its meaning — on its own. The whole chapter is one claim: <b>how you cut a document into chunks decides how good your retrieval is</b>. Cut well and the right passage surfaces; cut badly and the answer is shredded across two chunks.",
+    secondary: "Your policy assistant ingests PDFs like “Corporate Travel Policy 2026”. Before any of it can be searched, it has to be chopped into chunks. This step is invisible to users but it silently sets the ceiling on every answer.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Why not embed the whole document?",
+    active: ["doc"],
+    text: "One embedding is a single point in meaning-space. If you embed a 50-page policy as <b>one</b> vector, you average flights, hotels, meals, and visas into one blurry point that matches everything and nothing precisely. And even if it matched, you'd hand the LLM the entire document — far more text than it needs to answer one question.",
+    secondary: "A user asks “can I expense a taxi?”. A whole-document vector can't distinguish the taxi clause from the alcohol clause — they're smeared together. You want the retriever to surface the <b>ground-transport</b> paragraph specifically.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "One chunk = one coherent idea",
+    active: ["chunks"],
+    text: "The goal of splitting is that each chunk holds <b>one self-contained idea</b>, so its vector is a sharp, single point in meaning-space. When someone asks about meals, the meals chunk lights up and nothing else competes with it. Everything that follows is about cutting the document so each piece stays coherent.",
+    secondary: "Ideal target: each policy <b>clause</b> becomes its own chunk — “meal cap £35”, “alcohol not reimbursable”, “taxis allowed under £40” — each retrievable on its own.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Strategy 1 — fixed-size chunking",
+    tag: { kind: "bad", label: "naive default" },
+    active: ["chunk-1", "chunk-2"],
+    text: "The simplest strategy: cut every <b>N</b> units — say ~1000 <b>characters</b> (letters/spaces) or ~250 <b>tokens</b> (the sub-word pieces a model reads). You walk the text and slice at fixed offsets. It's fast and trivial to implement, which is why it's the lazy default — but it cuts <b>blindly</b>, ignoring where sentences and sections actually end.",
+    secondary: "Here the 1000-char boundary fell mid-sentence: chunk 1 ends at “Alcohol is” and chunk 2 starts at “not reimbursable”. Neither chunk alone says alcohol can't be expensed.",
+    secHead: "Cost & trade-off"
+  },
+  {
+    title: "Overlap — the patch for fixed-size",
+    active: ["chunk-1", "chunk-2"],
+    text: "<b>Overlap</b> means you repeat the last slice of one chunk (say the final 100–200 chars) at the <b>start</b> of the next. So a sentence cut across a boundary still appears whole inside at least one chunk. It rescues some split sentences — but it's a band-aid: it bloats your index with duplicated text and still can't tell where ideas actually begin and end.",
+    secondary: "With overlap, chunk 2 would begin “…Alcohol is not reimbursable” — the orange repeated text — so the full rule survives in one place. Useful, but you're papering over a blind cut, not making a smart one.",
+    secHead: "Cost & trade-off"
+  },
+  {
+    title: "Why fixed-size still hurts",
+    tag: { kind: "bad", label: "shreds structure" },
+    active: ["chunk-1", "chunk-2"],
+    text: "Even with overlap, fixed-size cutting slices through <b>tables</b>, <b>headings</b>, and multi-sentence clauses. A reimbursement table can land half in one chunk and half in another; a section heading gets orphaned from its body. The structure that made the document readable is exactly the structure fixed-size chunking destroys.",
+    secondary: "A policy expense table — rows like “Meals … £35 / Taxi … £40” — gets sawn in half at the 1000-char mark. Retrieval then returns half a table, and the LLM answers from incomplete data.",
+    secHead: "Cost & trade-off"
+  },
+  {
+    title: "Strategy 2 — context-aware chunking",
+    tag: { kind: "good", label: "recommended" },
+    active: ["chunks"],
+    text: "Split at <b>natural boundaries</b> instead of fixed offsets: headings, paragraphs, sections, list items. Each chunk ends where an idea ends, so it stays self-contained. You find these boundaries from the document's own <b>structure</b> (Markdown headings, PDF layout) or with an embedding model that detects where the topic shifts.",
+    secondary: "Now the cut lands cleanly at the heading boundary: the entire “Alcohol is not reimbursable” clause stays in <b>one</b> chunk. Ask “can I expense wine?” and that whole rule surfaces intact.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Docling — context-aware in practice",
+    tag: { kind: "good", label: "field pick" },
+    active: ["chunks"],
+    text: "<b>Docling</b> is a Python library that parses documents (PDF, DOCX) and offers <b>hybrid chunking</b> — a form of context-aware splitting that respects the parsed structure while keeping chunks within a target size. It's free, fast, and preserves headings and tables. For a real project, this is the field-tactical default: structure-aware, no model training, good out of the box.",
+    secondary: "Run policy PDFs through Docling's hybrid chunker so each section and table becomes its own chunk. You get clause-level chunks almost for free instead of hand-writing a splitter.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Strategy 3 — late chunking",
+    tag: { kind: "cost", label: "optional / advanced" },
+    active: ["doc", "chunks"],
+    text: "<b>Late chunking</b> flips the order. You first embed the <b>whole</b> document with a <b>long-context</b> embedding model (one that can read many pages at once), producing a per-token embedding aware of the full document. <b>Then</b> you split those token embeddings into chunks. Each chunk keeps awareness of surrounding context — so a chunk saying “it is not reimbursable” still encodes that “it” = alcohol.",
+    secondary: "Fascinating, not required. It's the most complex option and needs a long-context model. Mentioned here for exposure — reach for context-aware (Docling) first and only explore this if retrieval quality demands it.",
+    secHead: "Cost & trade-off"
+  },
+  {
+    title: "The Goldilocks size",
+    active: ["chunks"],
+    text: "Size is a balance. Chunks too <b>big</b> = imprecise retrieval (many topics averaged into one blurry vector) <b>and</b> they overwhelm the LLM with irrelevant text. Chunks too <b>small</b> = you lose the surrounding context that made the sentence meaningful (“it is not reimbursable” — what is “it”?). Aim for <b>one coherent idea per chunk</b>: not too big, not too small.",
+    secondary: "For policy clauses, “one idea” usually maps to one section or one rule — a few sentences. Big enough to carry the rule and its conditions, small enough to retrieve precisely.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Check yourself",
+    active: [],
+    text: "You've got the chapter when you can answer these from memory. Chunking sets the ceiling on retrieval — cut at meaning, not at fixed offsets.",
+    secondary: "1. Why <b>not</b> embed a whole document as a single vector?<br><br>2. What problem does <b>overlap</b> solve, and why is it only a patch?<br><br>3. Fixed-size vs context-aware splitting — which preserves document structure, and <b>why</b>?",
+    secHead: "Check yourself"
+  }
+];
+
+/* dynamic stage content — runs every step. Mutate live panels here. */
+function renderStage(step){
+  const doc = document.getElementById("doc");
+  const chunks = document.getElementById("chunks");
+  const c1 = document.getElementById("chunk-1");
+  const c2 = document.getElementById("chunk-2");
+  const cb1 = document.getElementById("cb-1");
+  const cb2 = document.getElementById("cb-2");
+  const branch = step.tag ? step.tag.kind : "";
+
+  // reset
+  c1.classList.remove("cut","hot","good","bad");
+  c2.classList.remove("cut","hot","good","bad");
+  cb1.innerHTML = "“…a per-day meal cap of £35 applies. Alcohol is";
+  cb2.innerHTML = "not reimbursable under any circumstances…”";
+
+  // colour the chunk cards to match the active branch
+  if ((step.active || []).includes("chunk-1") || (step.active || []).includes("chunks")) {
+    if (branch === "bad") { c1.classList.add("hot","bad"); c2.classList.add("hot","bad"); }
+    if (branch === "good"){ c1.classList.add("hot","good"); c2.classList.add("hot","good"); }
+  }
+
+  // fixed-size step: show the mid-sentence cut in red
+  if (step.title.startsWith("Strategy 1") || step.title.startsWith("Why fixed-size")) {
+    c1.classList.add("cut"); c2.classList.add("cut");
+  }
+
+  // overlap step: show repeated text in orange at the start of chunk 2
+  if (step.title.startsWith("Overlap")) {
+    cb2.innerHTML = '<span class="overlap">Alcohol is </span>not reimbursable under any circumstances…”';
+  }
+
+  // context-aware step: rewrite chunks so the whole clause is intact in chunk 2
+  if (step.title.startsWith("Strategy 2") || step.title.startsWith("Docling")) {
+    cb1.innerHTML = "“…a per-day meal cap of £35 applies.”";
+    cb2.innerHTML = "“Alcohol is not reimbursable under any circumstances.”";
+  }
+
+  // dim whichever side isn't in focus
+  const wantDoc = (step.active || []).includes("doc");
+  const wantChunks = (step.active || []).includes("chunks") ||
+                     (step.active || []).includes("chunk-1") ||
+                     (step.active || []).includes("chunk-2");
+  doc.classList.toggle("stage-hide", wantChunks && !wantDoc);
+  chunks.classList.toggle("stage-hide", wantDoc && !wantChunks);
+}
+
+/* ── stepper engine — do not edit below ─────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? s.tag.kind : "";
+  document.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("secondary-head").innerHTML = s.secHead || "★ In your travel app";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

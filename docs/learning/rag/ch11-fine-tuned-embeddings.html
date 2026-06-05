@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════
+  RAG COURSE — CHAPTER BASE TEMPLATE
+  Copy this file to chNN-*.html, then edit ONLY the AUTHOR blocks:
+    1. <head> <title>
+    2. the .chapnav prev/next links  (AUTHOR-NAV)
+    3. the header eyebrow / h1 / sub   (AUTHOR-HEAD)
+    4. the #stage markup               (AUTHOR-STAGE)
+    5. the `steps` array + renderStage() (AUTHOR-STEPS)
+  Leave the design system, the stepper engine, and the highlighter alone.
+  ════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- AUTHOR 1: title -->
+<title>RAG Course · Ch 11 · Fine-tuned embeddings</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  /* ---- cross-chapter nav ---- */
+  .chapnav {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .chapnav a {
+    color: var(--ink-dim); text-decoration: none; padding: 6px 11px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    transition: background .15s, color .15s, border-color .15s; white-space: nowrap;
+  }
+  .chapnav a:hover { background: var(--panel-2); color: var(--ink); border-color: var(--accent); }
+  .chapnav a.map { color: var(--accent); }
+  .chapnav .spacer { flex: 1; }
+  .chapnav a.disabled { opacity: .3; pointer-events: none; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 28px 30px; min-height: 280px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .arrow { color: #4a4f72; font-size: 22px; align-self: center; }
+
+  /* ---- optional: code panel with line highlighting ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; }
+  .code-line {
+    display: flex; font-size: 13px; line-height: 1.85; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .45;
+  }
+  .code-line .ln { width: 38px; text-align: right; padding-right: 14px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; } .c-num { color: #e5a663; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.cost { background: rgba(246,182,87,.15); color: var(--warn); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+
+  /* ---- AUTHOR-ADDED: scatter plot for the embedding space ----
+       These class names do NOT clash with the engine (which only
+       touches .node and .code-line). Safe to add. */
+  .scatter-wrap { display: flex; gap: 22px; flex-wrap: wrap; }
+  .plot {
+    position: relative; flex: 1; min-width: 280px; height: 290px;
+    background:
+      linear-gradient(rgba(139,155,255,.05) 1px, transparent 1px) 0 0 / 100% 29px,
+      linear-gradient(90deg, rgba(139,155,255,.05) 1px, transparent 1px) 0 0 / 29px 100%,
+      #0b0c14;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    transition: border-color .3s, box-shadow .3s;
+  }
+  .plot.live { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(139,155,255,.4), 0 10px 30px -16px var(--accent); }
+  .plot-label {
+    position: absolute; top: 10px; left: 12px; font-size: 11px; letter-spacing: .05em;
+    text-transform: uppercase; font-weight: 700; color: var(--ink-dim);
+  }
+  .plot.live .plot-label { color: var(--accent); }
+  /* a phrase plotted as a point */
+  .pt {
+    position: absolute; transform: translate(-50%, -50%);
+    transition: left .8s cubic-bezier(.6,.1,.2,1), top .8s cubic-bezier(.6,.1,.2,1), opacity .4s;
+    text-align: center; width: 0;
+  }
+  .pt .dotmark {
+    width: 12px; height: 12px; border-radius: 50%; margin: 0 auto;
+    background: var(--ink-dim); box-shadow: 0 0 0 4px rgba(154,156,184,.15);
+  }
+  .pt .lbl {
+    position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+    white-space: nowrap; font-size: 11.5px; color: var(--ink); margin-top: 2px;
+    background: rgba(11,12,20,.85); padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line);
+  }
+  /* the query point — the phrase we track */
+  .pt.query .dotmark { background: var(--accent); box-shadow: 0 0 0 5px rgba(139,155,255,.22); }
+  .pt.query .lbl { color: #fff; border-color: var(--accent); }
+  /* the negative-sentiment cluster */
+  .pt.neg .dotmark { background: var(--bad); box-shadow: 0 0 0 4px rgba(246,137,107,.18); }
+  .pt.neg .lbl { color: var(--bad); border-color: rgba(246,137,107,.5); }
+  /* the topical (order/shipping) neighbour */
+  .pt.topic .dotmark { background: var(--good); box-shadow: 0 0 0 4px rgba(92,211,164,.18); }
+  .pt.topic .lbl { color: var(--good); border-color: rgba(92,211,164,.5); }
+  /* the "nearest neighbour" link line */
+  .link {
+    position: absolute; height: 2px; transform-origin: 0 50%; pointer-events: none;
+    background: linear-gradient(90deg, var(--accent), transparent);
+    transition: all .8s cubic-bezier(.6,.1,.2,1); opacity: 0;
+  }
+  .link.on { opacity: .9; }
+</style>
+</head>
+<body>
+
+<!-- AUTHOR-NAV: set the three hrefs + the prev/next chapter labels. -->
+<nav class="chapnav">
+  <a class="map" href="index.html">⌂ Course map</a>
+  <span class="spacer"></span>
+  <a id="prevchap" href="ch10-pageindex.html">‹ Prev: PageIndex</a>
+  <a id="nextchap" href="ch12-travel-assistant.html">Next: Your travel assistant ›</a>
+</nav>
+
+<!-- AUTHOR-HEAD -->
+<header>
+  <div class="eyebrow">RAG course · chapter 11 · advanced</div>
+  <h1>Fine-tuned embeddings</h1>
+  <p class="sub">The embedding model decides what "similar" means. Off-the-shelf, that
+  meaning is generic. Fine-tune it on your domain and a small model can beat a big one —
+  and you can even reshape what "close" means. Step through with Next or the arrow keys.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<!-- ════ AUTHOR-STAGE ════════════════════════════════════════════════════
+     Two scatter plots of the SAME three phrases. Left = generic model,
+     right = sentiment-fine-tuned model. Points are positioned by % via
+     renderStage(); the query point's nearest neighbour FLIPS between them.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="stage" id="stage">
+  <div class="scatter-wrap">
+
+    <div class="plot" id="plot-generic">
+      <div class="plot-label">Generic model · "topic" space</div>
+      <div class="link" id="link-generic"></div>
+      <div class="pt query" id="g-query"><div class="dotmark"></div><div class="lbl">"my order was late"</div></div>
+      <div class="pt topic" id="g-topic"><div class="dotmark"></div><div class="lbl">"shipping was fast"</div></div>
+      <div class="pt neg"   id="g-neg"><div class="dotmark"></div><div class="lbl">"items are always sold out"</div></div>
+    </div>
+
+    <div class="plot" id="plot-finetuned">
+      <div class="plot-label">Fine-tuned model · "sentiment" space</div>
+      <div class="link" id="link-finetuned"></div>
+      <div class="pt query" id="f-query"><div class="dotmark"></div><div class="lbl">"my order was late"</div></div>
+      <div class="pt topic" id="f-topic"><div class="dotmark"></div><div class="lbl">"shipping was fast"</div></div>
+      <div class="pt neg"   id="f-neg"><div class="dotmark"></div><div class="lbl">"items are always sold out"</div></div>
+    </div>
+
+  </div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="secondary-head">★ In your travel app</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ⌂ Course map returns to the index</p>
+
+<script>
+/* ── syntax highlighter — keep ───────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","SELECT","FROM","WHERE","ORDER","BY","LIMIT","CREATE","TABLE"]);
+const FN = new Set(["useState","Promise","console","Map","Set","Array","Object","JSON","embed","search","rerank","query"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$|--.*$|#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  codeText.replace(/^\n/,"").split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* ════ AUTHOR-STEPS ══════════════════════════════════════════════════════ */
+const steps = [
+  {
+    title: "The mental model",
+    active: [],
+    text: "An <b>embedding</b> turns a piece of text into a list of numbers — a <b>vector</b> — and texts with nearby vectors are treated as similar. <b>Which</b> texts land near each other is decided entirely by the embedding model, and you can retrain that model so \"near\" means whatever your job needs.",
+    secondary: "This whole chapter is one claim: the embedding model is not fixed furniture. It is a thing you can specialize.",
+    show: "generic", neighbour: "topic", showFt: false
+  },
+  {
+    title: "Callback: the model defines \"close\"",
+    active: [],
+    text: "Back in chapter 2 we said similarity is just distance between vectors. But the model drew that map. An <b>off-the-shelf</b> model — one trained by someone else on broad internet text — learned a <b>generic</b> notion of similarity that is good at everything and perfect for nothing.",
+    secondary: "Left plot: three phrases placed by a generic model. Position = meaning, as that model sees it. Distance between dots = how similar it thinks they are.",
+    show: "generic", neighbour: null, showFt: false
+  },
+  {
+    title: "Generic sees TOPIC",
+    tag: { kind: "bad", label: "wrong for the goal" },
+    active: [],
+    text: "Watch the blue point, <b>\"my order was late\"</b>. A generic model parks it nearest <b>\"shipping was fast\"</b> (green) — because both sentences are <b>about the order / shipping</b>. The model groups by subject matter, the <b>topic</b>. That is the right answer to a different question than the one we're asking.",
+    secondary: "If your goal is \"find me complaints\", topical grouping actively hurts: a glowing review and a furious one sit side by side because they share a noun.",
+    show: "generic", neighbour: "topic", showFt: false
+  },
+  {
+    title: "What fine-tuning is",
+    active: [],
+    text: "<b>Fine-tuning</b> means taking a model someone already trained and continuing to train it on a smaller, focused dataset of <b>your</b> domain — legal text, medical notes, your policy corpus. It nudges the model to specialize. The same trick used on chatbots works on embedding models.",
+    secondary: "\"Pretrained\" = the broad, expensive training already done for you. Fine-tuning is the cheap, targeted second pass that bends it toward your data.",
+    show: "generic", neighbour: null, showFt: false
+  },
+  {
+    title: "It changes BOTH sides",
+    active: [],
+    text: "A fine-tuned embedding model is used in two places, and it changes both: at <b>indexing time</b> (when you embed your documents to store them) and at <b>query time</b> (when you embed the user's question to search). Same model, both ends — so the whole space gets redrawn, not just one query.",
+    secondary: "Practical consequence: switching models means you must <b>re-embed your entire corpus</b>. Old vectors and new vectors live in different spaces and can't be compared.",
+    show: "generic", neighbour: null, showFt: false
+  },
+  {
+    title: "Now fine-tune on sentiment",
+    active: [],
+    text: "Say we train the model on labelled examples of <b>positive vs negative</b> customer feedback — <b>sentiment</b>, the emotional charge of the text. The model stops caring about \"what is this about\" and starts caring about \"is this person happy or upset\". The map redraws.",
+    secondary: "The right-hand plot wakes up: same three phrases, re-placed by the sentiment-fine-tuned model. Notice the axes now mean \"upset ↔ happy\", not \"topic A ↔ topic B\".",
+    show: "both", neighbour: null, showFt: true
+  },
+  {
+    title: "The neighbour FLIPS",
+    tag: { kind: "good", label: "right for the goal" },
+    active: [],
+    text: "In the new space, <b>\"my order was late\"</b> moves away from \"shipping was fast\" and lands nearest <b>\"items are always sold out\"</b> (red) — because both are <b>negative experiences</b>, regardless of subject. You didn't change the sentences. You reshaped what \"close\" means.",
+    secondary: "This is the whole point of fine-tuning in one picture: same data, same query, different model — and a different, better answer for <b>your</b> goal.",
+    show: "ftonly", neighbour: "neg", showFt: true
+  },
+  {
+    title: "Small fine-tuned beats big generic",
+    tag: { kind: "good", label: "the payoff" },
+    active: [],
+    text: "On <b>your</b> data, a <b>small</b> or open-source model fine-tuned on your domain regularly <b>outperforms</b> a much larger generic one — reported gains land around <b>5–10% accuracy</b>. Smaller model = cheaper and faster to run, and it's more accurate where it matters. You win on both axes.",
+    secondary: "Big generic models are a great default. But \"bigger\" is not the only lever — \"more specialized\" can beat it outright on a narrow domain.",
+    show: "ftonly", neighbour: "neg", showFt: true
+  },
+  {
+    title: "The bill comes due",
+    tag: { kind: "cost", label: "data + upkeep" },
+    secHead: "Cost & trade-off",
+    active: [],
+    text: "Fine-tuning needs a sizable <b>labelled dataset</b> (text paired with the answer you want it to learn), training <b>infrastructure</b>, and ongoing <b>maintenance</b> — it is now <b>your</b> model to keep current as your domain drifts. That's real, recurring work you've taken on.",
+    secondary: "Reach for fine-tuning <b>last</b>. Exhaust prompting, better chunking, and reranking first — they're far cheaper and often enough.",
+    show: "both", neighbour: null, showFt: true
+  },
+  {
+    title: "When it's actually worth it",
+    active: [],
+    text: "Fine-tuning pays off once two things are true: you <b>have</b> the labelled data, and you have enough <b>query volume</b> that the last few points of accuracy are worth the upkeep. Below that bar, the math doesn't close — the effort costs more than the gain.",
+    secondary: "Order of attack: prompt → chunk well → hybrid + rerank → <b>then</b> fine-tune embeddings. Each step is more work than the last; only climb when the cheaper rungs run out.",
+    show: "both", neighbour: null, showFt: true
+  },
+  {
+    title: "In your travel assistant",
+    active: [],
+    text: "For the policy assistant, fine-tuning is <b>probably overkill early on</b> — a good generic model plus reranking will carry you a long way. It becomes the lever to pull <b>later</b>: once you've logged lots of real <b>(query, policy)</b> pairs and need the last few points of retrieval accuracy.",
+    secondary: "Concretely: thousands of logged \"can I expense X?\" questions, each tied to the policy clause that actually answered it. That labelled history is the dataset that would make fine-tuning worth it.",
+    show: "both", neighbour: null, showFt: true
+  },
+  {
+    title: "Explain it back",
+    secHead: "Check yourself",
+    active: [],
+    text: "You now know what fine-tuning an embedding model buys you and what it costs. Close the page and answer these out loud before moving on.",
+    secondary: "1. What does fine-tuning change about an embedding model — and which two stages (indexing, query) does it affect?<br><br>2. In the sentiment example, which neighbour did \"my order was late\" move <b>from</b> and <b>to</b>, and why?<br><br>3. What's the cost that makes fine-tuning a last resort, not a first move?",
+    show: "both", neighbour: null, showFt: true
+  }
+];
+
+/* ── point positions (in %) for each layout ──────────────────────────────
+   GENERIC: query sits next to the topical (green) phrase.
+   FINE-TUNED: query sits next to the negative (red) phrase. */
+const POS = {
+  generic: {
+    query: { x: 30, y: 38 },
+    topic: { x: 46, y: 30 },   // close to query — topical neighbour
+    neg:   { x: 76, y: 74 }    // far away
+  },
+  finetuned: {
+    query: { x: 34, y: 70 },
+    topic: { x: 72, y: 26 },   // far away now (it's positive)
+    neg:   { x: 50, y: 78 }    // close to query — negative neighbour
+  }
+};
+
+function place(prefix, layout){
+  const p = POS[layout];
+  ["query","topic","neg"].forEach(k=>{
+    const el = document.getElementById(prefix + "-" + k);
+    el.style.left = p[k].x + "%";
+    el.style.top  = p[k].y + "%";
+  });
+}
+
+/* draw the nearest-neighbour link line from query to a target point */
+function drawLink(plotId, linkId, prefix, layout, target){
+  const link = document.getElementById(linkId);
+  if(!target){ link.classList.remove("on"); return; }
+  const plot = document.getElementById(plotId);
+  const W = plot.clientWidth, H = plot.clientHeight;
+  const a = POS[layout].query, b = POS[layout][target];
+  const ax = a.x/100*W, ay = a.y/100*H, bx = b.x/100*W, by = b.y/100*H;
+  const dx = bx-ax, dy = by-ay;
+  const len = Math.sqrt(dx*dx + dy*dy);
+  const ang = Math.atan2(dy, dx) * 180/Math.PI;
+  link.style.left = ax + "px";
+  link.style.top  = ay + "px";
+  link.style.width = len + "px";
+  link.style.transform = "rotate(" + ang + "deg)";
+  link.style.background = target === "neg"
+    ? "linear-gradient(90deg, var(--bad), transparent)"
+    : "linear-gradient(90deg, var(--good), transparent)";
+  link.classList.add("on");
+}
+
+/* dynamic stage content — runs every step. Mutate live panels here. */
+function renderStage(step){
+  const ftPlot = document.getElementById("plot-finetuned");
+  const genPlot = document.getElementById("plot-generic");
+
+  // fine-tuned plot fades in only once it's relevant
+  ftPlot.style.opacity = step.showFt ? "1" : ".18";
+
+  // place points in their layout
+  place("g", "generic");
+  place("f", "finetuned");
+
+  // which plot is "live" (glowing)
+  const liveGen  = step.show === "generic" || step.show === "both";
+  const liveFt   = step.show === "ftonly"  || step.show === "both";
+  genPlot.classList.toggle("live", liveGen && step.show !== "ftonly");
+  ftPlot.classList.toggle("live", liveFt);
+
+  // nearest-neighbour links. generic shows topic link, fine-tuned shows neg link
+  const showGenLink = (step.show === "generic") && step.neighbour === "topic";
+  const showFtLink  = (step.show === "ftonly")  && step.neighbour === "neg";
+  // small delay so the move animation lands before the line snaps in
+  requestAnimationFrame(()=>{
+    drawLink("plot-generic",   "link-generic",   "g", "generic",   showGenLink ? "topic" : null);
+    drawLink("plot-finetuned", "link-finetuned", "f", "finetuned", showFtLink  ? "neg"   : null);
+  });
+}
+
+/* ── stepper engine — do not edit below ─────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? s.tag.kind : "";
+  document.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("secondary-head").innerHTML = s.secHead || "★ In your travel app";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+window.addEventListener("resize", () => render());
+render();
+</script>
+</body>
+</html>

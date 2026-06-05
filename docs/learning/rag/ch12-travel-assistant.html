@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════
+  RAG COURSE — CHAPTER BASE TEMPLATE
+  Copy this file to chNN-*.html, then edit ONLY the AUTHOR blocks:
+    1. <head> <title>
+    2. the .chapnav prev/next links  (AUTHOR-NAV)
+    3. the header eyebrow / h1 / sub   (AUTHOR-HEAD)
+    4. the #stage markup               (AUTHOR-STAGE)
+    5. the `steps` array + renderStage() (AUTHOR-STEPS)
+  Leave the design system, the stepper engine, and the highlighter alone.
+  ════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- AUTHOR 1: title -->
+<title>Capstone — architecting your travel assistant · RAG Course</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  /* ---- cross-chapter nav ---- */
+  .chapnav {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .chapnav a {
+    color: var(--ink-dim); text-decoration: none; padding: 6px 11px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    transition: background .15s, color .15s, border-color .15s; white-space: nowrap;
+  }
+  .chapnav a:hover { background: var(--panel-2); color: var(--ink); border-color: var(--accent); }
+  .chapnav a.map { color: var(--accent); }
+  .chapnav .spacer { flex: 1; }
+  .chapnav a.disabled { opacity: .3; pointer-events: none; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 28px 30px; min-height: 280px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .arrow { color: #4a4f72; font-size: 22px; align-self: center; }
+
+  /* ---- optional: code panel with line highlighting ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; }
+  .code-line {
+    display: flex; font-size: 13px; line-height: 1.85; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .45;
+  }
+  .code-line .ln { width: 38px; text-align: right; padding-right: 14px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; } .c-num { color: #e5a663; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.cost { background: rgba(246,182,87,.15); color: var(--warn); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<!-- AUTHOR-NAV: set the three hrefs + the prev/next chapter labels.
+     For ch01, give Prev the class "disabled". For the last chapter, give Next "disabled". -->
+<nav class="chapnav">
+  <a class="map" href="index.html">⌂ Course map</a>
+  <span class="spacer"></span>
+  <a id="prevchap" href="ch11-fine-tuned-embeddings.html">‹ Prev: Fine-tuned embeddings</a>
+  <a id="nextchap" class="disabled" href="index.html">Next: Course map ›</a>
+</nav>
+
+<!-- AUTHOR-HEAD -->
+<header>
+  <div class="eyebrow">RAG course · chapter 12 · capstone</div>
+  <h1>Capstone — architecting your travel assistant</h1>
+  <p class="sub">Your own question, answered: one database or many for NHS vs government
+  policy? One vector DB or several? And which 3-5 of these strategies should you
+  actually pick? Step through with Next or the arrow keys.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<!-- ════ AUTHOR-STAGE ════════════════════════════════════════════════════ -->
+<div class="stage" id="stage">
+  <div style="display:flex; flex-direction:column; gap:14px;">
+
+    <div class="node" id="lvl1">
+      <div class="n-title">Level 1 — One table + metadata filter</div>
+      <div class="n-desc">policy_chunks(..., domain) · WHERE domain = 'NHS' · default, start here</div>
+    </div>
+
+    <div class="arrow" style="align-self:center;">↓ escalate only if forced</div>
+
+    <div class="node" id="lvl2">
+      <div class="n-title">Level 2 — Separate tables / schemas, same database</div>
+      <div class="n-desc">different shapes, retention, or access controls · one DB, easy ops</div>
+    </div>
+
+    <div class="arrow" style="align-self:center;">↓ escalate only if forced</div>
+
+    <div class="node" id="lvl3">
+      <div class="n-title">Level 3 — Separate physical databases</div>
+      <div class="n-desc">hard isolation: compliance, data-residency, independent scaling</div>
+    </div>
+
+    <div class="node" id="stack" style="margin-top:8px; border-color:#3a3f66;">
+      <div class="n-title">★ Your recommended stack — pick 5</div>
+      <div class="n-desc">context-aware chunking · re-ranking · agentic RAG · contextual retrieval · metadata filtering by jurisdiction</div>
+    </div>
+
+  </div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="secondary-head">★ In your travel app</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ⌂ Course map returns to the index</p>
+
+<script>
+/* ── syntax highlighter — keep ───────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","SELECT","FROM","WHERE","ORDER","BY","LIMIT","CREATE","TABLE"]);
+const FN = new Set(["useState","Promise","console","Map","Set","Array","Object","JSON","embed","search","rerank","query"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$|--.*$|#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  codeText.replace(/^\n/,"").split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* ════ AUTHOR-STEPS ══════════════════════════════════════════════════════ */
+const steps = [
+  {
+    title: "The real question is isolation",
+    active: [],
+    text: "You asked: separate databases per domain, since NHS policy isn't government policy? Reframe it as one knob — <b>isolation</b>, meaning how separated each policy domain's data must be. This whole chapter is one rule: <b>start with the least isolation, escalate only when a concrete requirement forces you</b>.",
+    secondary: "Domains here = the bodies whose rules you store: NHS travel policy, central-government policy, a private client's expense rules. They overlap a lot (caps, receipts) and differ in a few spots — perfect for sharing one store and filtering."
+  },
+  {
+    title: "Level 1 — one table, metadata filter",
+    tag: { kind: 'good' },
+    active: ['lvl1'],
+    text: "Default: a single <code>policy_chunks</code> table with a <b>domain</b> column (also called a <b>metadata filter</b> — a plain tag stored next to each row). A <b>chunk</b> is one small passage of a policy doc you embedded. You search vectors and add <code>WHERE domain = 'NHS'</code> in the same query. One index to maintain, trivial cross-domain questions, and pgvector handles it.",
+    secHead: "★ In your travel app",
+    secondary: "An <b>embedding</b> is the policy text turned into a <b>vector</b> — a list of numbers capturing meaning — so similar wording sits close together. <b>pgvector</b> is the Postgres extension that stores those vectors and does the nearest-match search. Level 1 keeps NHS and gov in one table, separated only by the tag."
+  },
+  {
+    title: "Why metadata filtering is enough early",
+    active: ['lvl1'],
+    text: "The filter does real isolation work: <code>WHERE domain='NHS'</code> means a gov-only clause can never surface for an NHS user, even though both live in one table. And cross-domain questions (\"does any policy allow business class over 6 hours?\") are a one-line change — drop the filter. Splitting now would <b>buy you nothing</b> and cost you those easy queries.",
+    secondary: "Concrete: user asks \"can I expense airport parking?\" Your retriever runs vector search + <code>WHERE domain = $userDomain</code>, pulls the parking clause from the right policy only, and the LLM explains it. No second database needed for that to be correct."
+  },
+  {
+    title: "Level 2 — separate tables, same database",
+    active: ['lvl2'],
+    text: "Escalate to <b>separate tables or schemas</b> (a schema = a named folder of tables inside one database) when domains have genuinely different <b>shapes</b>, retention rules, or access controls — but you still want one database and simple operations. You get cleaner per-domain structure and permissions while keeping one connection, one backup, one deploy.",
+    secHead: "★ In your travel app",
+    secondary: "Example trigger: NHS policy must be purged after 3 years but government policy is kept indefinitely, or only certain staff may read a private client's rules. Different retention/access per domain is a real shape difference — Level 2 earns its keep. Vague \"feels cleaner\" does not."
+  },
+  {
+    title: "Level 3 — separate physical databases",
+    tag: { kind: 'cost', label: 'only if forced' },
+    active: ['lvl3'],
+    text: "Reach for <b>separate physical databases</b> only when you need <b>hard isolation</b>: a compliance or data-residency rule (data must live in a specific country), a very different security boundary, or one domain that must scale independently. This is the strongest separation and the last resort.",
+    secHead: "Cost & trade-off",
+    secondary: "The bill: you lose cheap cross-domain joins (now it's two queries stitched in app code), you run two of everything — backups, migrations, monitoring — and ops complexity roughly doubles. Pay this <b>only</b> when a named requirement forces it, never \"to be safe\"."
+  },
+  {
+    title: "Different vector DBs? Almost never early",
+    active: ['lvl1', 'stack'],
+    text: "Your direct question: do NHS and government need different <b>vector databases</b> (a store specialised for nearest-vector search)? Almost never early. Use the <b>same</b> store — Postgres + pgvector — and <b>partition by metadata</b>, i.e. the same domain tag from Level 1. RAG itself never needs a second vector store; you'd add one only for the isolation/compliance reasons above.",
+    secondary: "Separate vector DBs don't make retrieval more accurate — accuracy comes from chunking, filtering, and re-ranking. A second store is an <b>isolation</b> decision (Level 2/3), not a RAG decision. Don't conflate the two."
+  },
+  {
+    title: "The decision rule, stated plainly",
+    active: ['lvl1', 'lvl2', 'lvl3'],
+    text: "Walk the ladder: <b>start at Level 1</b> (one table, metadata filter). Move to Level 2 (separate tables) only when shape/retention/access differs. Move to Level 3 (separate databases) only when security, compliance, or scale forces it. <b>Never pre-split</b> — every level up adds cost and buys nothing until a concrete requirement demands it.",
+    secHead: "Cost & trade-off",
+    secondary: "Pre-splitting is the classic over-engineering trap: you pay the ops and join cost on day one for an isolation guarantee no requirement is asking for yet. The cheap move is to start merged — promoting a domain out later is straightforward; merging two databases back is not."
+  },
+  {
+    title: "Now pick strategies — 3 to 5, not all",
+    active: ['stack'],
+    text: "You've met a dozen RAG strategies across this course. The source guidance is to <b>combine three to five</b>, not bolt on all of them — each adds latency and moving parts. Next three steps give a concrete starter set for <i>this</i> app, justified one line each.",
+    secondary: "More strategies isn't better retrieval; it's more to tune and debug. Pick for your actual failure modes — structured policy docs and vague expense questions — and stop there until you measure a real gap."
+  },
+  {
+    title: "Picks 1-3 — chunking, re-ranking, agentic",
+    active: ['stack'],
+    text: "(1) <b>Context-aware chunking</b> — policy docs are structured, so split per clause instead of every N characters, keeping each rule whole. (2) <b>Re-ranking</b> — a second model that re-scores the top candidates by true relevance; vague expense questions pull noisy matches, this cleans them. (3) <b>Agentic RAG</b> — let the model choose its move: precise vector search vs read a whole policy section.",
+    secondary: "Re-ranking uses a <b>cross-encoder</b> — a model that reads the question and a candidate chunk <i>together</i> and scores the pair, far more accurate than the first-pass vector match (which scored them apart). It's slower, so you only run it on the top ~20 candidates."
+  },
+  {
+    title: "Picks 4-5 — contextual retrieval + metadata",
+    active: ['stack'],
+    text: "(4) <b>Contextual retrieval</b> — prepend a short \"this clause is from the NHS 2024 travel policy\" note to each chunk before embedding; kills the NHS-vs-gov ambiguity where an isolated clause looks identical across domains. (5) <b>Metadata filtering by jurisdiction</b> — the Level 1 isolation answer, now also a retrieval strategy. <b>PageIndex</b> is worth evaluating too, since policy manuals are so structured.",
+    secHead: "★ In your travel app",
+    secondary: "<b>PageIndex</b> builds a table-of-contents tree of a document and navigates it like a human flipping to a section, instead of pure vector search. Policy PDFs with numbered sections are its ideal case — evaluate it against your re-ranking baseline before committing."
+  },
+  {
+    title: "The line that governs all of it",
+    active: ['stack'],
+    text: "Tie back to your project's core rule: the <b>LLM decides</b> (which chunks to pull, how to search, how to explain the rule in English) and <b>deterministic code does</b> (enforces the cap, approves, books). RAG retrieves the policy <i>text</i>; your code enforces the actual limit. <b>RAG must never set the cap or approve anything</b> — retrieval is evidence, not authority.",
+    secHead: "★ In your travel app",
+    secondary: "Failure to avoid: the LLM reads \"meals up to £30\" and tries to approve a £28 dinner itself. Wrong layer. RAG surfaces the clause and the number; a deterministic check compares £28 ≤ £30 and books. The model explains, the code decides the outcome."
+  },
+  {
+    title: "Check yourself",
+    active: [],
+    secHead: "Check yourself",
+    text: "You can now answer your own opening question. Reconstruct the chapter from these three prompts before you move on.",
+    secondary: "1) Which isolation level is your <b>default</b>, and what specific thing would force you up a level?<br><br>2) One vector DB or many for NHS vs government policy — and <b>why</b>?<br><br>3) Name your 3-5 strategies and justify <b>one</b> of them in a sentence."
+  }
+];
+
+/* dynamic stage content — runs every step. */
+function renderStage(step){
+  /* static stage; highlighting handled by the engine via step.active */
+}
+
+/* ── stepper engine — do not edit below ─────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? s.tag.kind : "";
+  document.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("secondary-head").innerHTML = s.secHead || "★ In your travel app";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

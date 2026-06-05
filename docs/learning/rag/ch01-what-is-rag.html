@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════
+  RAG COURSE — CHAPTER BASE TEMPLATE
+  Copy this file to chNN-*.html, then edit ONLY the AUTHOR blocks:
+    1. <head> <title>
+    2. the .chapnav prev/next links  (AUTHOR-NAV)
+    3. the header eyebrow / h1 / sub   (AUTHOR-HEAD)
+    4. the #stage markup               (AUTHOR-STAGE)
+    5. the `steps` array + renderStage() (AUTHOR-STEPS)
+  Leave the design system, the stepper engine, and the highlighter alone.
+  ════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- AUTHOR 1: title -->
+<title>RAG Course · Ch 01 · What RAG is</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  /* ---- cross-chapter nav ---- */
+  .chapnav {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .chapnav a {
+    color: var(--ink-dim); text-decoration: none; padding: 6px 11px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    transition: background .15s, color .15s, border-color .15s; white-space: nowrap;
+  }
+  .chapnav a:hover { background: var(--panel-2); color: var(--ink); border-color: var(--accent); }
+  .chapnav a.map { color: var(--accent); }
+  .chapnav .spacer { flex: 1; }
+  .chapnav a.disabled { opacity: .3; pointer-events: none; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 28px 30px; min-height: 280px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .arrow { color: #4a4f72; font-size: 22px; align-self: center; }
+
+  /* ---- optional: code panel with line highlighting ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; }
+  .code-line {
+    display: flex; font-size: 13px; line-height: 1.85; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .45;
+  }
+  .code-line .ln { width: 38px; text-align: right; padding-right: 14px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; } .c-num { color: #e5a663; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.cost { background: rgba(246,182,87,.15); color: var(--warn); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<!-- AUTHOR-NAV: set the three hrefs + the prev/next chapter labels.
+     For ch01, give Prev the class "disabled". For the last chapter, give Next "disabled". -->
+<nav class="chapnav">
+  <a class="map" href="index.html">⌂ Course map</a>
+  <span class="spacer"></span>
+  <a id="prevchap" class="disabled" href="index.html">‹ Prev: Course map</a>
+  <a id="nextchap" href="ch02-embeddings.html">Next: Embeddings ›</a>
+</nav>
+
+<!-- AUTHOR-HEAD -->
+<header>
+  <div class="eyebrow">RAG course · chapter 01 · foundations</div>
+  <h1>What RAG is — and why it exists</h1>
+  <p class="sub">A language model only knows what it was trained on. RAG lets it
+  look things up in YOUR documents before it answers. Step through the whole
+  pipeline once.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<!-- ════ AUTHOR-STAGE ════════════════════════════════════════════════════
+     Two-row pipeline. Top row = INDEXING (done once). Bottom row = RETRIEVAL
+     (done every question). Each box has a unique id so steps can light it up.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="stage" id="stage">
+
+  <div style="font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--warn); font-weight:600; margin-bottom:10px;">
+    Phase 1 · Indexing — done once, ahead of time
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:26px;">
+    <div class="node" id="ix-docs" style="flex:1; min-width:120px;">
+      <div class="n-title">📄 Documents</div>
+      <div class="n-desc">your PDFs, wikis</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="ix-chunk" style="flex:1; min-width:120px;">
+      <div class="n-title">✂ Chunk</div>
+      <div class="n-desc">split into pieces</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="ix-embed" style="flex:1; min-width:120px;">
+      <div class="n-title">🔢 Embed</div>
+      <div class="n-desc">text → numbers</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="ix-store" style="flex:1; min-width:120px;">
+      <div class="n-title">🗄 Vector DB</div>
+      <div class="n-desc">store the numbers</div>
+    </div>
+  </div>
+
+  <div style="font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--good); font-weight:600; margin-bottom:10px;">
+    Phase 2 · Retrieval — done on every question
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <div class="node" id="rt-query" style="flex:1; min-width:120px;">
+      <div class="n-title">❓ Question</div>
+      <div class="n-desc">the user asks</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="rt-embed" style="flex:1; min-width:120px;">
+      <div class="n-title">🔢 Embed query</div>
+      <div class="n-desc">question → numbers</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="rt-search" style="flex:1; min-width:120px;">
+      <div class="n-title">🔍 Search</div>
+      <div class="n-desc">find similar chunks</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node" id="rt-llm" style="flex:1; min-width:120px;">
+      <div class="n-title">🤖 LLM</div>
+      <div class="n-desc">grounded answer</div>
+    </div>
+  </div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <!-- AUTHOR: rename this heading per topic: "In your travel app", "Cost & trade-off",
+       "Gotcha", "Check yourself". -->
+  <div class="card secondary">
+    <h3 id="secondary-head">★ In your travel app</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ⌂ Course map returns to the index</p>
+
+<script>
+/* ── syntax highlighter — keep ───────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","SELECT","FROM","WHERE","ORDER","BY","LIMIT","CREATE","TABLE"]);
+const FN = new Set(["useState","Promise","console","Map","Set","Array","Object","JSON","embed","search","rerank","query"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$|--.*$|#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  codeText.replace(/^\n/,"").split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* ════ AUTHOR-STEPS ══════════════════════════════════════════════════════ */
+const steps = [
+  {
+    title: "The one idea to keep",
+    active: [],
+    text: "A <b>RAG</b> system fetches the relevant slice of your own documents and pastes it into the model's prompt <i>before</i> the model writes its answer. The model never memorizes your docs — it reads them fresh at answer time. Everything below is just how that fetch-then-answer works.",
+    secondary: "By the end you'll be able to trace a question like <i>\"can I expense a £200 hotel in London?\"</i> through every box and see exactly where the policy answer comes from.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "What an LLM actually is",
+    active: [],
+    text: "An <b>LLM</b> (large language model) is a program that predicts text one piece at a time. It was <b>trained once</b> on a huge pile of text up to a fixed <b>training cutoff</b> — a date after which it has seen nothing. After training, its knowledge is frozen.",
+    secondary: "The travel assistant's brain is an LLM. On its own it knows generic facts about travel, but nothing about <i>your company's</i> rules — those didn't exist in its training pile.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Three ways a bare LLM fails you",
+    tag: { kind: 'bad', label: 'failure modes' },
+    active: [],
+    text: "Ask a bare LLM about your world and it breaks three ways. <b>Stale knowledge</b>: anything after the cutoff is invisible. <b>No private access</b>: it never saw your internal PDFs or wikis. <b>Hallucination</b>: when it doesn't know, it <b>confidently invents</b> a plausible-sounding answer instead of admitting the gap.",
+    secondary: "Ask it your 2026 expense cap and it might cheerfully reply \"£150\" — a number it made up. Hallucination is worst here because a wrong policy number looks exactly as confident as a right one.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "The fix, in one line",
+    active: ['rt-search','rt-llm'],
+    text: "Before the model answers, <b>retrieve</b> the relevant text from your documents and <b>paste it into the prompt</b> as context. That's the whole trick. The model now answers from text it can actually see, not from memory it doesn't have.",
+    secondary: "Same question, now grounded: we first pull the matching policy paragraph, drop it above the question, and the LLM answers from that paragraph instead of guessing.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "What R · A · G stand for",
+    active: [],
+    text: "<b>R</b>etrieval = find the relevant text in your documents. <b>A</b>ugmented = add that text into the prompt. <b>G</b>eneration = the model writes the answer using it. Retrieval-Augmented Generation: look it up, glue it in, then write.",
+    secondary: "RAG is not a special model — it's a <i>wrapper</i> around an ordinary LLM. You can bolt it onto the same model your travel app already calls.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Why not paste ALL the docs in?",
+    tag: { kind: 'cost', label: 'trade-off' },
+    active: [],
+    text: "A model can only read so much text at once — its <b>context window</b> (the maximum amount of text it can take in for one request). Your full document set is far too big to fit, costs money per word sent, and burying the answer in noise actually <b>distracts</b> the model. So you retrieve only the relevant slice.",
+    secondary: "Your policy library might be hundreds of pages. Pasting all of it every time is slow, expensive, and worse-answering than handing over the one paragraph that mentions London hotels.",
+    secHead: "Cost & trade-off"
+  },
+  {
+    title: "Phase 1 — Indexing (done once)",
+    active: ['ix-docs','ix-chunk','ix-embed','ix-store'],
+    text: "Everything from here is the two-phase pipeline above. <b>Phase 1, indexing</b>, runs <b>once ahead of time</b> to prepare your documents for fast lookup. Watch the top row: Documents → Chunk → Embed → Vector DB. We'll take it one box at a time.",
+    secondary: "You index your travel-policy PDFs the day you upload them, not on every chat message. Indexing is the prep work; answering questions reuses it.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Index step: Chunk, then Embed",
+    active: ['ix-chunk','ix-embed'],
+    text: "<b>Chunking</b> splits each document into small pieces (a chunk = roughly a paragraph) so you can fetch a precise slice later, not a whole file. <b>Embedding</b> turns each chunk into a <b>vector</b> — a list of numbers that captures its meaning, so similar meanings end up as nearby numbers. (Chapter 2 covers embeddings in depth.)",
+    secondary: "Your 40-page travel policy becomes maybe 300 chunks. The paragraph on London hotel caps becomes one chunk, with its own vector — findable on its own.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Index step: store in a Vector DB",
+    active: ['ix-store'],
+    text: "A <b>vector database</b> stores all those chunk-vectors and is built to answer one question fast: <i>which stored vectors are closest to this one?</i> That's it for Phase 1 — your documents now live as searchable numbers, ready for any future question.",
+    secondary: "In this app the vector DB is Postgres with the <code>pgvector</code> extension — the same database holding your bookings also holds the policy-chunk vectors.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Phase 2 — Retrieval (every question)",
+    active: ['rt-query','rt-embed','rt-search','rt-llm'],
+    text: "<b>Phase 2, retrieval</b>, runs on <b>every single question</b>. Bottom row: embed the question into a vector → search the vector DB for the closest chunks → hand the top few to the LLM → it writes a <b>grounded</b> answer (one backed by retrieved text, not memory).",
+    secondary: "Question vector and chunk vectors live in the same number-space, so \"closest vector\" really means \"most similar in meaning\" — that's how the right policy paragraph surfaces.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "The payoff: edit a doc, answers update",
+    tag: { kind: 'good', label: 'why it wins' },
+    active: ['ix-docs','ix-store'],
+    text: "Because the model <b>reads</b> your docs at answer time instead of <b>memorizing</b> them, you never retrain it. Change a document, re-index just that one, and the next answer reflects the change <b>instantly</b>. Knowledge lives in the vector DB, not baked into the model.",
+    secondary: "Finance raises the London hotel cap from £200 to £250: re-index that one paragraph, and the very next \"can I expense...\" question answers £250 — ideally citing the exact updated clause.",
+    secHead: "★ In your travel app"
+  },
+  {
+    title: "Recap — explain it back",
+    active: [],
+    text: "You can now trace any question through both rows above: index once, retrieve every time. Before clicking to Chapter 2 (Embeddings), answer these out loud — if you can, the foundation is solid.",
+    secondary: "1) What do the <b>R</b>, <b>A</b>, and <b>G</b> each stand for?<br>2) Why <i>not</i> just paste every document into the prompt?<br>3) When you edit a source document, what happens to the answers — and why is there no retraining?",
+    secHead: "Check yourself"
+  }
+];
+
+/* dynamic stage content — runs every step. Mutate live panels here. */
+function renderStage(step){
+  /* static stage this chapter; highlighting is driven by step.active */
+}
+
+/* ── stepper engine — do not edit below ─────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? s.tag.kind : "";
+  document.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("secondary-head").innerHTML = s.secHead || "★ In your travel app";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

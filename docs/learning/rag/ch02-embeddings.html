@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════
+  RAG COURSE — CHAPTER BASE TEMPLATE
+  Copy this file to chNN-*.html, then edit ONLY the AUTHOR blocks:
+    1. <head> <title>
+    2. the .chapnav prev/next links  (AUTHOR-NAV)
+    3. the header eyebrow / h1 / sub   (AUTHOR-HEAD)
+    4. the #stage markup               (AUTHOR-STAGE)
+    5. the `steps` array + renderStage() (AUTHOR-STEPS)
+  Leave the design system, the stepper engine, and the highlighter alone.
+  ════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- AUTHOR 1: title -->
+<title>RAG Course · Ch 02 · Embeddings</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  /* ---- cross-chapter nav ---- */
+  .chapnav {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .chapnav a {
+    color: var(--ink-dim); text-decoration: none; padding: 6px 11px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    transition: background .15s, color .15s, border-color .15s; white-space: nowrap;
+  }
+  .chapnav a:hover { background: var(--panel-2); color: var(--ink); border-color: var(--accent); }
+  .chapnav a.map { color: var(--accent); }
+  .chapnav .spacer { flex: 1; }
+  .chapnav a.disabled { opacity: .3; pointer-events: none; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 28px 30px; min-height: 280px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .arrow { color: #4a4f72; font-size: 22px; align-self: center; }
+
+  /* ---- optional: code panel with line highlighting ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; }
+  .code-line {
+    display: flex; font-size: 13px; line-height: 1.85; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .45;
+  }
+  .code-line .ln { width: 38px; text-align: right; padding-right: 14px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; } .c-num { color: #e5a663; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.cost { background: rgba(246,182,87,.15); color: var(--warn); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<!-- AUTHOR-NAV: set the three hrefs + the prev/next chapter labels.
+     For ch01, give Prev the class "disabled". For the last chapter, give Next "disabled". -->
+<nav class="chapnav">
+  <a class="map" href="index.html">⌂ Course map</a>
+  <span class="spacer"></span>
+  <a id="prevchap" href="ch01-what-is-rag.html">‹ Prev: What RAG is</a>
+  <a id="nextchap" href="ch03-vector-databases.html">Next: Vector databases ›</a>
+</nav>
+
+<!-- AUTHOR-HEAD -->
+<header>
+  <div class="eyebrow">RAG course · chapter 02 · foundations</div>
+  <h1>Embeddings — turning meaning into numbers</h1>
+  <p class="sub">The trick that makes search work on MEANING instead of keywords:
+  every piece of text becomes a point in space, and nearby points mean similar things.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<!-- ════ AUTHOR-STAGE ════════════════════════════════════════════════════
+     A 2-D scatter (a flattened projection of high-dim vectors). One query
+     point, two relevant doc points sitting close, two unrelated points far.
+     Per-step we toggle .lit on circles and draw "closeness" links via JS.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="stage" id="stage">
+  <svg id="scatter" viewBox="0 0 760 320" width="100%" style="display:block;">
+    <!-- faint axis hint: this 2-D picture is a flattened view of many dimensions -->
+    <line x1="40" y1="290" x2="720" y2="290" stroke="#2c2f48" stroke-width="1"/>
+    <line x1="40" y1="290" x2="40" y2="30" stroke="#2c2f48" stroke-width="1"/>
+    <text x="730" y="294" fill="#4a4f72" font-size="11" font-family="monospace">dim&#8201;1</text>
+    <text x="44" y="26" fill="#4a4f72" font-size="11" font-family="monospace">dim&#8201;2</text>
+
+    <!-- closeness links (drawn/cleared by renderStage) -->
+    <g id="links"></g>
+
+    <!-- POINTS: id, cx, cy, label, kind (query|rel|far) -->
+    <!-- query -->
+    <g class="pt" id="p-query" data-kind="query" transform="translate(250,150)">
+      <circle r="11" />
+      <text x="0" y="-18" text-anchor="middle">"reimbursement cap?"</text>
+    </g>
+    <!-- relevant docs (cluster near query) -->
+    <g class="pt" id="p-rel1" data-kind="rel" transform="translate(320,110)">
+      <circle r="9" />
+      <text x="14" y="4">maximum claimable amount</text>
+    </g>
+    <g class="pt" id="p-rel2" data-kind="rel" transform="translate(200,205)">
+      <circle r="9" />
+      <text x="-14" y="4" text-anchor="end">spend limit per trip</text>
+    </g>
+    <!-- unrelated docs (far away) -->
+    <g class="pt" id="p-far1" data-kind="far" transform="translate(620,70)">
+      <circle r="9" />
+      <text x="0" y="-16" text-anchor="middle">river bank erosion</text>
+    </g>
+    <g class="pt" id="p-far2" data-kind="far" transform="translate(640,250)">
+      <circle r="9" />
+      <text x="0" y="26" text-anchor="middle">airport lounge wifi</text>
+    </g>
+  </svg>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <!-- AUTHOR: rename this heading per topic: "In your travel app", "Cost & trade-off",
+       "Gotcha", "Check yourself". -->
+  <div class="card secondary">
+    <h3 id="secondary-head">★ In your travel app</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ⌂ Course map returns to the index</p>
+
+<style>
+  /* scatter styling — uses palette vars, on theme */
+  #scatter text { fill: var(--ink-dim); font-size: 12px; font-family: "SF Mono", Menlo, monospace; }
+  #scatter .pt circle {
+    fill: #2a2e4c; stroke: var(--line); stroke-width: 1.5;
+    transition: fill .3s, stroke .3s, r .3s;
+  }
+  #scatter .pt text { transition: fill .3s, font-weight .3s; }
+  /* lit states */
+  #scatter .pt.lit[data-kind="query"] circle { fill: var(--accent); stroke: #fff; }
+  #scatter .pt.lit[data-kind="query"] text  { fill: #fff; font-weight: 700; }
+  #scatter .pt.lit[data-kind="rel"] circle  { fill: var(--good); stroke: var(--good); }
+  #scatter .pt.lit[data-kind="rel"] text    { fill: var(--good); font-weight: 700; }
+  #scatter .pt.lit[data-kind="far"] circle  { fill: var(--bad); stroke: var(--bad); }
+  #scatter .pt.lit[data-kind="far"] text    { fill: var(--bad); }
+  #scatter .link { stroke-width: 2; opacity: .9; }
+  #scatter .link.near { stroke: var(--good); }
+  #scatter .link.far  { stroke: var(--bad); stroke-dasharray: 5 5; }
+</style>
+
+<script>
+/* ── syntax highlighter — keep ───────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","SELECT","FROM","WHERE","ORDER","BY","LIMIT","CREATE","TABLE"]);
+const FN = new Set(["useState","Promise","console","Map","Set","Array","Object","JSON","embed","search","rerank","query"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$|--.*$|#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  codeText.replace(/^\n/,"").split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* ════ AUTHOR-STEPS ══════════════════════════════════════════════════════ */
+const steps = [
+  {
+    title: "The one idea",
+    active: [],
+    text: "An <b>embedding</b> turns a piece of text into a list of numbers placed as a point in space — and the magic property is that <b>text with similar meaning lands close together</b>. That single fact is what lets search match on meaning instead of matching exact words.",
+    secondary: "Your policy assistant will store every chunk of every policy PDF as one of these points, then answer a question by finding the nearest points to it.",
+    links: []
+  },
+  {
+    title: "What a vector is",
+    active: [],
+    text: "A <b>vector</b> is just an <b>ordered list of numbers</b>, like <code>[0.12, -0.04, 0.88, …]</code>. \"Ordered\" matters: the 1st number and the 5th number mean different things, so you can't shuffle them. Each slot in the list is called a <b>dimension</b>.",
+    secondary: "Think of a single point's address. Two numbers give a point on a page (x, y); a real embedding gives ~1536 numbers — a point in 1536-dimensional space you can't picture, only compute on.",
+    links: []
+  },
+  {
+    title: "What an embedding is",
+    active: ["p-query"],
+    text: "An <b>embedding</b> is the vector a model produces for some text. The <b>embedding model</b> is the function that reads text and outputs that fixed-length list — e.g. 1536 numbers, every time, no matter how long the input. Here the highlighted dot is the embedding of the question <code>\"reimbursement cap?\"</code>.",
+    secondary: "Same model in, same length out. Whether you feed it a 3-word query or a 300-word policy paragraph, you get back a vector of the exact same size, so they're all points in one shared space.",
+    links: []
+  },
+  {
+    title: "This picture is a flattened view",
+    active: ["p-query","p-rel1","p-rel2","p-far1","p-far2"],
+    text: "You can't draw 1536 dimensions, so this scatter is a <b>2-D projection</b> — the real high-dimensional positions squashed down onto a page so we can see them. The relative idea survives: things that are close in the real space stay close-ish here.",
+    secondary: "Don't read the exact x/y values as meaningful. The only thing to trust in a projection like this is roughly who clusters near whom.",
+    links: []
+  },
+  {
+    title: "Similar meaning → close points",
+    active: ["p-query","p-rel1","p-rel2"],
+    text: "Here's the property in action. The question sits right next to <b>\"maximum claimable amount\"</b> and <b>\"spend limit per trip\"</b> — because they <b>mean</b> the same thing, even though they share almost no words with \"reimbursement cap\". Embeddings capture <b>semantics</b> (meaning), not spelling.",
+    secondary: "\"dog\" and \"puppy\" land close despite sharing no letters; the model learned they're used in the same way, so it places them near each other.",
+    links: [
+      { from: "p-query", to: "p-rel1", kind: "near" },
+      { from: "p-query", to: "p-rel2", kind: "near" }
+    ]
+  },
+  {
+    title: "Unrelated meaning → far points",
+    active: ["p-query","p-far1","p-far2"],
+    text: "The same property pushes junk away. <b>\"river bank erosion\"</b> and <b>\"airport lounge wifi\"</b> sit far from the question — different meaning, so distant points. Notice \"bank\" appears in <code>river bank</code> and in <code>money bank</code> but they land far apart: the model reads context, not the word.",
+    secondary: "This is why embeddings don't get fooled by shared spelling. A keyword search for \"bank\" would mix up rivers and money; an embedding keeps them in separate neighborhoods.",
+    links: [
+      { from: "p-query", to: "p-far1", kind: "far" },
+      { from: "p-query", to: "p-far2", kind: "far" }
+    ]
+  },
+  {
+    title: "Why this beats keyword search",
+    tag: { kind: "good", label: "the leap" },
+    active: ["p-query","p-rel1"],
+    text: "<b>Keyword search</b> needs the same words to be present — search \"reimbursement cap\" and it can only return text containing those words. Embeddings match <b>meaning</b>, so the query can hit <b>\"maximum claimable amount\"</b> with <b>zero shared words</b>. That's the whole upgrade.",
+    secondary: "Real policy docs never use your phrasing. A user asks \"what's the cap?\" and the PDF says \"the maximum claimable amount per night shall not exceed…\". Keyword search returns nothing; embeddings find it.",
+    links: [ { from: "p-query", to: "p-rel1", kind: "near" } ]
+  },
+  {
+    title: "Cosine similarity = the angle",
+    active: ["p-query","p-rel1","p-rel2"],
+    text: "To rank \"how close\" we score pairs with <b>cosine similarity</b>: imagine each vector as an arrow from the origin, and measure the <b>angle between two arrows</b>. Small angle = pointing the same way = same meaning; we compare <b>direction</b>, not word overlap.",
+    secondary: "We use the angle (direction) rather than raw distance because direction captures \"about the same topic\" while ignoring how long the text is. A short query and a long paragraph can still point the same way.",
+    links: [
+      { from: "p-query", to: "p-rel1", kind: "near" },
+      { from: "p-query", to: "p-rel2", kind: "near" }
+    ]
+  },
+  {
+    title: "Reading the score",
+    active: ["p-query","p-rel1","p-far1"],
+    text: "Cosine similarity comes out as a number you can sort on: about <b>1</b> means the arrows point the same way (same meaning), about <b>0</b> means unrelated, and negative means opposite. So <code>cos(query, \"maximum claimable amount\") ≈ 0.9</code> ranks above <code>cos(query, \"river bank erosion\") ≈ 0.1</code>.",
+    secondary: "Retrieval is then just: embed the question, score it against every stored chunk, and keep the top few highest scores. That's the entire \"R\" in RAG.",
+    links: [
+      { from: "p-query", to: "p-rel1", kind: "near" },
+      { from: "p-query", to: "p-far1", kind: "far" }
+    ]
+  },
+  {
+    title: "Same model on both sides",
+    tag: { kind: "bad", label: "hard rule" },
+    active: ["p-query"],
+    text: "Critical: you must embed the <b>query</b> and the <b>documents</b> with the <b>same embedding model</b>. Two different models build two different spaces, so their numbers aren't comparable — the distances become meaningless and retrieval silently returns garbage.",
+    secondary: "Embed every policy chunk with model X at ingest time, then embed each incoming question with model X too. Swap the model later and you must re-embed the entire corpus, or old and new vectors won't line up.",
+    links: []
+  },
+  {
+    title: "What it costs",
+    tag: { kind: "cost", label: "trade-off" },
+    secHead: "Cost & trade-off",
+    active: [],
+    text: "Embedding is <b>cheap and fast</b> — one quick model call per chunk, done once at ingest. The trade-offs are mild: <b>more dimensions = more storage and slightly slower comparisons</b>, and <b>which model you pick changes quality</b> for your domain.",
+    secondary: "For specialized wording (legal-ish policy language, NHS vs government travel rules) a general model may blur distinctions. Tuning the model to your domain is a later topic — we cover it in chapter 11 (fine-tuning).",
+    links: []
+  },
+  {
+    title: "Explain it back",
+    secHead: "Check yourself",
+    active: [],
+    text: "You now hold the core of retrieval: text becomes points, and <b>close = similar meaning</b>. Everything in the next chapters (storing, searching, re-ranking) is built on this one fact.",
+    secondary: "Answer without scrolling up:<br>1. Why can \"cap\" match \"maximum claimable amount\" when keyword search can't?<br>2. What does <b>cosine similarity</b> actually measure?<br>3. What must be identical on the query side and the document side — and what breaks if it isn't?",
+    links: []
+  }
+];
+
+/* dynamic stage content — runs every step. Draw closeness links + lit points. */
+const PTS = {
+  "p-query": [250,150], "p-rel1": [320,110], "p-rel2": [200,205],
+  "p-far1": [620,70],  "p-far2": [640,250]
+};
+function renderStage(step){
+  // lit points
+  document.querySelectorAll("#scatter .pt").forEach(g => {
+    g.classList.toggle("lit", (step.active || []).includes(g.id));
+  });
+  // closeness links
+  const g = document.getElementById("links");
+  g.innerHTML = "";
+  (step.links || []).forEach(lk => {
+    const a = PTS[lk.from], b = PTS[lk.to];
+    if (!a || !b) return;
+    const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+    line.setAttribute("x1", a[0]); line.setAttribute("y1", a[1]);
+    line.setAttribute("x2", b[0]); line.setAttribute("y2", b[1]);
+    line.setAttribute("class", "link " + lk.kind);
+    g.appendChild(line);
+  });
+}
+
+/* ── stepper engine — do not edit below ─────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? s.tag.kind : "";
+  document.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("secondary-head").innerHTML = s.secHead || "★ In your travel app";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

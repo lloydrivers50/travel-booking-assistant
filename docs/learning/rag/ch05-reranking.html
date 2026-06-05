@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════
+  RAG COURSE — CHAPTER BASE TEMPLATE
+  Copy this file to chNN-*.html, then edit ONLY the AUTHOR blocks:
+    1. <head> <title>
+    2. the .chapnav prev/next links  (AUTHOR-NAV)
+    3. the header eyebrow / h1 / sub   (AUTHOR-HEAD)
+    4. the #stage markup               (AUTHOR-STAGE)
+    5. the `steps` array + renderStage() (AUTHOR-STEPS)
+  Leave the design system, the stepper engine, and the highlighter alone.
+  ════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- AUTHOR 1: title -->
+<title>RAG Course · Ch 05 · Re-ranking</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  /* ---- cross-chapter nav ---- */
+  .chapnav {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .chapnav a {
+    color: var(--ink-dim); text-decoration: none; padding: 6px 11px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    transition: background .15s, color .15s, border-color .15s; white-space: nowrap;
+  }
+  .chapnav a:hover { background: var(--panel-2); color: var(--ink); border-color: var(--accent); }
+  .chapnav a.map { color: var(--accent); }
+  .chapnav .spacer { flex: 1; }
+  .chapnav a.disabled { opacity: .3; pointer-events: none; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 28px 30px; min-height: 280px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .arrow { color: #4a4f72; font-size: 22px; align-self: center; }
+
+  /* ---- optional: code panel with line highlighting ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; }
+  .code-line {
+    display: flex; font-size: 13px; line-height: 1.85; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .45;
+  }
+  .code-line .ln { width: 38px; text-align: right; padding-right: 14px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; } .c-num { color: #e5a663; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.cost { background: rgba(246,182,87,.15); color: var(--warn); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+
+  /* ---- funnel viz (author-added; scoped, no engine impact) ---- */
+  .funnel { display: flex; align-items: stretch; gap: 18px; }
+  .fcol { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .fcol h4 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 2px; }
+  .pool {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 12px; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start;
+    min-height: 150px; transition: border-color .25s, box-shadow .25s;
+  }
+  .pool.hot { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent); }
+  .pool.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .pool .bigcount { width: 100%; font-size: 13px; font-weight: 700; color: var(--ink); }
+  .chip {
+    width: 16px; height: 16px; border-radius: 4px; background: #2f3457;
+    transition: background .3s, transform .3s;
+  }
+  .chip.keep { background: var(--good); }
+  .chip.drop { background: #23263b; }
+  .fmid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-width: 130px; }
+  .reranker {
+    background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-radius: 11px;
+    padding: 14px 12px; text-align: center; font-weight: 700; font-size: 13px;
+    border: 1px solid transparent; transition: box-shadow .25s, transform .25s; opacity: .7;
+  }
+  .reranker.hot { opacity: 1; transform: translateY(-2px); box-shadow: 0 10px 30px -10px var(--accent); }
+  .reranker small { display: block; font-weight: 500; font-size: 11px; color: #dfe2ff; margin-top: 4px; opacity: .9; }
+</style>
+</head>
+<body>
+
+<!-- AUTHOR-NAV: set the three hrefs + the prev/next chapter labels.
+     For ch01, give Prev the class "disabled". For the last chapter, give Next "disabled". -->
+<nav class="chapnav">
+  <a class="map" href="index.html">⌂ Course map</a>
+  <span class="spacer"></span>
+  <a id="prevchap" href="ch04-chunking.html">‹ Prev: Chunking</a>
+  <a id="nextchap" href="ch06-query-strategies.html">Next: Query strategies ›</a>
+</nav>
+
+<!-- AUTHOR-HEAD -->
+<header>
+  <div class="eyebrow">RAG course · chapter 05 · retrieval</div>
+  <h1>Re-ranking — pull many, keep the best</h1>
+  <p class="sub">The single most-used strategy in production RAG. A two-stage retrieval:
+  grab lots of candidates cheaply, then a smarter (slower) model keeps only the few that
+  are truly relevant. Step through with Next or the arrow keys.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<!-- ════ AUTHOR-STAGE ════ funnel: large candidate pool -> reranker -> small kept set -->
+<div class="stage" id="stage">
+  <div class="funnel">
+    <div class="fcol">
+      <h4>Stage 1 · vector search</h4>
+      <div class="pool" id="pool-in">
+        <div class="bigcount" id="count-in">candidates</div>
+      </div>
+    </div>
+    <div class="fmid">
+      <div class="arrow">→</div>
+      <div class="reranker" id="reranker">RERANKER
+        <small>scores each (query, chunk) pair</small>
+      </div>
+      <div class="arrow">→</div>
+    </div>
+    <div class="fcol">
+      <h4>Stage 2 · sent to LLM</h4>
+      <div class="pool" id="pool-out">
+        <div class="bigcount" id="count-out">kept</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="secondary-head">★ In your travel app</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ⌂ Course map returns to the index</p>
+
+<script>
+/* ── syntax highlighter — keep ───────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","SELECT","FROM","WHERE","ORDER","BY","LIMIT","CREATE","TABLE"]);
+const FN = new Set(["useState","Promise","console","Map","Set","Array","Object","JSON","embed","search","rerank","query"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$|--.*$|#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  codeText.replace(/^\n/,"").split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* ════ AUTHOR-STEPS ════ */
+const steps = [
+  {
+    title: "The one idea",
+    active: [],
+    text: "<b>Re-ranking</b> is a two-stage retrieval: first pull a <b>large</b> batch of candidate text using cheap, fast search, then run a <b>smarter, slower model</b> over just that batch to keep only the few pieces that truly answer the question. <b>Consider more, feed less.</b>",
+    secondary: "Walk away with this: fast search casts a wide net; a second model trims the net down to what actually matters before the LLM ever sees it."
+  },
+  {
+    title: "Recap: a chunk and a vector",
+    active: ['pool-in'],
+    text: "Quick terms. A <b>chunk</b> is one small slice of a document — a paragraph or two of a policy PDF. An <b>embedding</b> is that chunk turned into a <b>vector</b>: a long list of numbers that captures its meaning, so chunks about the same topic land near each other in number-space.",
+    poolIn: 50, poolOut: 0,
+    secondary: "Your policy handbook gets sliced into hundreds of chunks; each chunk's embedding is pre-computed once and stored in the vector database."
+  },
+  {
+    title: "Stage 1 is fast but coarse",
+    tag: { kind: 'bad', label: 'imprecise' },
+    active: ['pool-in'],
+    text: "Vector search finds chunks whose vectors sit closest to the query's vector — usually by <b>cosine similarity</b> (the angle between two vectors; smaller angle = more alike). It's fast, but <b>coarse</b>: the closest matches by raw geometry often include near-misses that look related but don't actually answer the question.",
+    poolIn: 50, poolOut: 0,
+    secHead: "★ In your travel app",
+    secondary: "Ask \"is business class allowed for a 6-hour flight?\" and vector search happily returns chunks about business-class lounges, baggage class, and economy upgrades — close in meaning, wrong in substance."
+  },
+  {
+    title: "Stage 1: pull MANY, not few",
+    active: ['pool-in'],
+    text: "So instead of grabbing the top 5, Stage 1 deliberately pulls a <b>large candidate set</b> — say 50 chunks. The real answer is very likely somewhere in those 50, even if it's not ranked #1. This is still cheap: vector search over pre-computed vectors is just fast math.",
+    poolIn: 50, poolOut: 0,
+    secondary: "50 policy chunks come back for the flight question — the 4 that truly answer it are in there, but buried at ranks 12, 19, 30, and 41."
+  },
+  {
+    title: "Why so coarse? The bi-encoder",
+    active: ['pool-in'],
+    text: "The embeddings from chapter 2 come from a <b>bi-encoder</b> (\"bi\" = two, separately): the query is turned into a vector on its own, and each chunk was turned into a vector on its own, ahead of time. They're only ever <b>compared</b> as finished vectors — the model <b>never reads the query and the chunk together</b>.",
+    poolIn: 50, poolOut: 0,
+    secHead: "Why it's fast",
+    secondary: "Because chunks are encoded once, in advance, you can search millions of them instantly. That pre-computation is exactly what makes a bi-encoder cheap — and also what makes it blind to the specific query."
+  },
+  {
+    title: "Stage 2: the cross-encoder reranker",
+    active: ['reranker'],
+    text: "The <b>reranker</b> is usually a <b>cross-encoder</b> (\"cross\" = together): it takes the <b>(query, chunk) pair</b> and reads <b>both at once</b> in a single pass, then outputs one relevance score. Seeing them together lets it catch wording, conditions, and intent a separated comparison misses — far more accurate.",
+    poolIn: 50, poolOut: 0,
+    secHead: "Bi vs cross, in one line",
+    secondary: "Bi-encoder: encode query and chunk apart, compare vectors (fast, coarse). Cross-encoder: read query and chunk together, score the pair (slow, precise)."
+  },
+  {
+    title: "Score every pair, sort",
+    active: ['reranker'],
+    text: "The reranker scores all 50 (query, chunk) pairs and sorts them by true relevance. Chunks that merely <i>looked</i> related sink; chunks that genuinely answer the question rise to the top. Note it runs on <b>50</b> pairs, not the whole database — that's the whole trick to keeping it affordable.",
+    poolIn: 50, poolOut: 0,
+    secondary: "Now the 4 buried answer-chunks jump to ranks 1-4; the lounge and baggage chunks that fooled Stage 1 drop to the bottom."
+  },
+  {
+    title: "Keep the top few",
+    tag: { kind: 'good', label: 'precise' },
+    active: ['pool-out'],
+    text: "Take only the top <b>5</b> reranked chunks and discard the other 45. This is the funnel: <b>50 in, 5 out</b>. You considered a wide pool but you hand the LLM a tight, high-signal set.",
+    poolIn: 50, poolOut: 5,
+    secondary: "The 4 chunks that actually define the business-class rule go to the model; the 46 near-misses never get there to confuse the answer."
+  },
+  {
+    title: "Why not just send all 50?",
+    active: ['pool-out'],
+    text: "Because more context isn't better context. Stuffing 50 chunks triggers the <b>\"lost in the middle\"</b> effect: language models pay strong attention to the start and end of a long input but <b>skim the middle</b>, so a correct fact sitting mid-list can be ignored. Fewer, sharper chunks beat a big noisy pile.",
+    poolIn: 50, poolOut: 5,
+    secHead: "★ In your travel app",
+    secondary: "Hand the model 50 policy chunks and the one line capping business class to flights over 8 hours sits at position 27 — squarely in the blind spot. It answers wrong, confidently."
+  },
+  {
+    title: "The cost of a second model",
+    tag: { kind: 'cost', label: 'trade-off' },
+    active: ['reranker'],
+    text: "Re-ranking adds <b>one extra model call</b> per query and a bit of latency — the cross-encoder has to read all 50 pairs. The cost stays small <b>only because you cap the shortlist</b>: never rerank the whole database, just the ~50 from Stage 1. Pull 5,000 candidates and the reranker becomes the slow part.",
+    poolIn: 50, poolOut: 5,
+    secHead: "Cost & trade-off",
+    secondary: "Tune the two numbers: a bigger Stage-1 pool catches more true answers but costs more reranking; a smaller kept-set is cleaner for the LLM but risks dropping a real answer. 50 → 5 is a common starting point."
+  },
+  {
+    title: "Check yourself",
+    active: [],
+    secHead: "Check yourself",
+    text: "You've got the production pattern: <b>pull many cheaply, keep the best with a precise second pass.</b> Re-ranking is the highest-leverage upgrade you can add to a basic RAG retriever.",
+    secondary: "Answer in your own words:<br><br>1. Why use <b>two stages</b> instead of just one vector search?<br><br>2. <b>Bi-encoder vs cross-encoder</b> — which one reads the query and chunk <b>together</b>, and why does that make it slower?<br><br>3. Why <b>not</b> just send all 50 candidates straight to the LLM?"
+  }
+];
+
+/* dynamic stage content — runs every step. Builds the chip pools from counts. */
+function fillPool(el, total, kept, keepFromCount){
+  // remove old chips, keep the .bigcount label
+  [...el.querySelectorAll('.chip')].forEach(c => c.remove());
+  for (let k = 0; k < total; k++){
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    if (keepFromCount != null){
+      chip.classList.add(k < kept ? 'keep' : 'drop');
+    }
+    el.appendChild(chip);
+  }
+}
+function renderStage(step){
+  const inN  = step.poolIn  != null ? step.poolIn  : 0;
+  const outN = step.poolOut != null ? step.poolOut : 0;
+
+  const poolIn = document.getElementById('pool-in');
+  const poolOut = document.getElementById('pool-out');
+
+  // input pool: show all candidates; mark the eventual keepers green once we know them
+  fillPool(poolIn, inN, outN, outN > 0 ? outN : null);
+  document.getElementById('count-in').textContent =
+    inN > 0 ? inN + ' candidates' : 'candidates';
+
+  // output pool: only the kept chunks, all green
+  fillPool(poolOut, outN, outN, outN > 0 ? outN : null);
+  document.getElementById('count-out').textContent =
+    outN > 0 ? outN + ' kept' : 'kept';
+}
+
+/* ── stepper engine — do not edit below ─────────────────────────────────── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? s.tag.kind : "";
+  document.querySelectorAll(".node, .code-line, .pool, .reranker").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  document.getElementById("secondary-head").innerHTML = s.secHead || "★ In your travel app";
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

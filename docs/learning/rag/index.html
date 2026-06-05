@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RAG, from zero — course map</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 80px; max-width: 1100px; margin: 0 auto;
+  }
+  .mono, code { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code { background: #0b0c14; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; color: #cdd2ee; }
+
+  .eyebrow { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--warn); font-weight: 600; margin-bottom: 10px; }
+  h1 { font-size: 38px; line-height: 1.15; font-weight: 800; background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { color: var(--ink-dim); margin-top: 12px; max-width: 720px; font-size: 16px; }
+
+  /* pipeline band */
+  .pipeline { margin: 34px 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; }
+  .pipeline .lbl { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 14px; }
+  .flow { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; }
+  .chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; font-size: 13px; font-weight: 600; display: flex; flex-direction: column; gap: 2px; min-width: 92px; }
+  .chip small { font-weight: 400; color: var(--ink-dim); font-size: 11px; }
+  .chip.prep { border-color: #3a4a7a; }
+  .chip.ret { border-color: #3a6a55; }
+  .arr { align-self: center; color: #4a4f72; font-size: 18px; }
+  .legend { display: flex; gap: 18px; margin-top: 16px; font-size: 12px; color: var(--ink-dim); flex-wrap: wrap; }
+  .legend span::before { content: "●"; margin-right: 6px; }
+  .legend .prep::before { color: #5a78d6; }
+  .legend .ret::before { color: var(--good); }
+
+  /* parts + chapters */
+  .part { margin-top: 38px; }
+  .part-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  .part-h .pn { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  .part-h .pd { font-size: 13px; color: var(--ink-dim); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  a.ch { text-decoration: none; color: inherit; display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; transition: transform .12s, border-color .15s, box-shadow .15s; }
+  a.ch:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 10px 30px -16px var(--accent); }
+  a.ch .num { font-size: 12px; font-weight: 700; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  a.ch .t { font-size: 16px; font-weight: 700; margin: 4px 0 6px; }
+  a.ch .d { font-size: 13px; color: var(--ink-dim); }
+  a.ch.capstone { border-color: #6a5a3a; background: linear-gradient(160deg, var(--panel), #211d12); }
+  a.ch.capstone:hover { border-color: var(--warn); box-shadow: 0 10px 30px -16px var(--warn); }
+
+  .note { margin-top: 36px; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 16px 20px; font-size: 14px; color: var(--ink-dim); }
+  .note b { color: var(--ink); }
+  footer { margin-top: 40px; color: #4a4f72; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="eyebrow">a self-paced course · 12 chapters · open one per sitting</div>
+<h1>RAG, from zero</h1>
+<p class="sub">Retrieval-Augmented Generation — giving a language model the ability to
+search your own documents before it answers. This course teaches the <b>spine</b> first
+(what RAG is, embeddings, vector databases, chunking), then hangs every strategy off
+it, and lands on a real architecture decision in your own travel assistant.</p>
+
+<div class="pipeline">
+  <div class="lbl">The whole pipeline, in one glance</div>
+  <div class="flow">
+    <div class="chip prep">Documents<small>your knowledge</small></div>
+    <div class="arr">→</div>
+    <div class="chip prep">Chunk<small>split up</small></div>
+    <div class="arr">→</div>
+    <div class="chip prep">Embed<small>→ numbers</small></div>
+    <div class="arr">→</div>
+    <div class="chip prep">Vector DB<small>store</small></div>
+    <div class="arr">┊</div>
+    <div class="chip ret">Query<small>user asks</small></div>
+    <div class="arr">→</div>
+    <div class="chip ret">Embed<small>→ numbers</small></div>
+    <div class="arr">→</div>
+    <div class="chip ret">Search<small>find similar</small></div>
+    <div class="arr">→</div>
+    <div class="chip ret">LLM<small>answer</small></div>
+  </div>
+  <div class="legend">
+    <span class="prep">Indexing — done once, ahead of time (chapters 2–4)</span>
+    <span class="ret">Retrieval — done on every question (chapters 5–11)</span>
+  </div>
+</div>
+
+<div class="part">
+  <div class="part-h"><span class="pn">Part 1 — Foundations</span><span class="pd">the spine. Read these in order.</span></div>
+  <div class="grid">
+    <a class="ch" href="ch01-what-is-rag.html"><div class="num">Chapter 01</div><div class="t">What RAG is &amp; why it exists</div><div class="d">The problem with a model that only knows its training data — and the two-phase fix.</div></a>
+    <a class="ch" href="ch02-embeddings.html"><div class="num">Chapter 02</div><div class="t">Embeddings: meaning as numbers</div><div class="d">How text becomes a vector, and why "close" vectors mean "similar meaning".</div></a>
+    <a class="ch" href="ch03-vector-databases.html"><div class="num">Chapter 03</div><div class="t">Vector databases &amp; similarity search</div><div class="d">Where the vectors live and how a query finds its nearest neighbours. Postgres + pgvector.</div></a>
+    <a class="ch" href="ch04-chunking.html"><div class="num">Chapter 04</div><div class="t">Chunking: splitting documents well</div><div class="d">Why you must split, and fixed-size vs context-aware vs late chunking.</div></a>
+  </div>
+</div>
+
+<div class="part">
+  <div class="part-h"><span class="pn">Part 2 — Retrieval strategies</span><span class="pd">making the search return the <i>right</i> chunks.</span></div>
+  <div class="grid">
+    <a class="ch" href="ch05-reranking.html"><div class="num">Chapter 05</div><div class="t">Re-ranking</div><div class="d">Pull many, then a second model keeps only the truly relevant. The #1 strategy.</div></a>
+    <a class="ch" href="ch06-query-strategies.html"><div class="num">Chapter 06</div><div class="t">Query strategies</div><div class="d">Expansion, multi-query, and self-reflective RAG — fixing the question before/after the search.</div></a>
+    <a class="ch" href="ch07-agentic-rag.html"><div class="num">Chapter 07</div><div class="t">Agentic &amp; hierarchical RAG</div><div class="d">Let the agent choose how to search — and search small, return big.</div></a>
+  </div>
+</div>
+
+<div class="part">
+  <div class="part-h"><span class="pn">Part 3 — Advanced &amp; alternatives</span><span class="pd">richer indexing, and a vectorless rival.</span></div>
+  <div class="grid">
+    <a class="ch" href="ch08-contextual-retrieval.html"><div class="num">Chapter 08</div><div class="t">Contextual retrieval</div><div class="d">Anthropic's trick: prepend each chunk with where it fits in the document.</div></a>
+    <a class="ch" href="ch09-knowledge-graphs.html"><div class="num">Chapter 09</div><div class="t">Knowledge graphs</div><div class="d">Store entities and relationships, not just similarity. Search the connections.</div></a>
+    <a class="ch" href="ch10-pageindex.html"><div class="num">Chapter 10</div><div class="t">PageIndex: vectorless RAG</div><div class="d">"Similarity ≠ relevance." A table-of-contents tree the LLM reasons over — no embeddings.</div></a>
+    <a class="ch" href="ch11-fine-tuned-embeddings.html"><div class="num">Chapter 11</div><div class="t">Fine-tuned embeddings</div><div class="d">Train the embedding model on your domain so a small model beats a big generic one.</div></a>
+  </div>
+</div>
+
+<div class="part">
+  <div class="part-h"><span class="pn">Part 4 — Capstone</span><span class="pd">put it to work.</span></div>
+  <div class="grid">
+    <a class="ch capstone" href="ch12-travel-assistant.html"><div class="num">Chapter 12</div><div class="t">Architecting your travel assistant</div><div class="d">Your own question: separate databases per policy domain (NHS vs government)? One vector DB or many? Which 3–5 strategies to actually pick.</div></a>
+  </div>
+</div>
+
+<div class="note">
+  <b>How to use this.</b> Each chapter is a self-driven stepper — press <code>Next</code> or use
+  the <code>←</code> <code>→</code> arrow keys, one idea per step. The golden rule from the field:
+  a strong RAG system usually <b>combines three to five</b> of these strategies, not all of them.
+  By chapter 12 you'll choose yours. Don't binge — one or two chapters a sitting beats burning out on all twelve.
+</div>
+
+<footer>Built from the "11 RAG strategies" rundown + PageIndex · pairs with the travel-booking-assistant project.</footer>
+
+</body>
+</html>
