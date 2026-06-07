@@ -1,27 +1,18 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
-const filePath = join(
-  process.cwd(),
-  '..',
-  '..',
-  'docs',
-  'sample-policies',
-  'nhs-expenses.pdf',
-);
+import { Injectable, OnModuleInit, Logger, Inject } from '@nestjs/common';
+import type { DocumentSource } from './document-source';
+import { DOCUMENT_SOURCE } from './document-source';
 
 @Injectable()
 export class IngestionService implements OnModuleInit {
   private readonly logger = new Logger(IngestionService.name);
 
-  async onModuleInit() {
-    await this.ingest();
-  }
+  constructor(
+    @Inject(DOCUMENT_SOURCE)
+    private readonly source: DocumentSource,
+  ) {}
 
-  private async ingest() {
-    const data = await readFile(filePath);
-    this.logger.log(data.byteLength);
+  async onModuleInit() {
+    const bytes = await this.source.getBytes();
+    this.logger.log(bytes.byteLength);
   }
 }

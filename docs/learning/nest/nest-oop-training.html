@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OOP &amp; NestJS DI — from zero</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 90px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 18px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  /* ---- chapter ribbon ---- */
+  .parts { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 4px; }
+  .part-chip {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--ink-dim); background: var(--panel-2); cursor: pointer;
+    transition: all .2s;
+  }
+  .part-chip:hover { color: var(--ink); }
+  .part-chip.active { background: linear-gradient(120deg, #5a78d6, #7d5fd0); color: #fff; border-color: transparent; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  button.ghost { background: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; max-width: 420px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+  .dot.p1.done, .dot.p1.active { background: #6ea8ff; }
+  .dot.p2.done, .dot.p2.active { background: #c79bff; }
+  .dot.p3.done, .dot.p3.active { background: var(--good); }
+  .dot.p4.done, .dot.p4.active { background: var(--warn); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 22px 24px; min-height: 220px;
+  }
+  .stage-head { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 14px; }
+
+  /* analogy / picture block */
+  .picture { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; min-height: 150px; }
+  .bigbox {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; text-align: center; min-width: 130px;
+    transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .bigbox .emoji { font-size: 30px; display: block; margin-bottom: 6px; }
+  .bigbox .bt { font-weight: 700; font-size: 13.5px; }
+  .bigbox .bd { color: var(--ink-dim); font-size: 11.5px; margin-top: 3px; }
+  .bigbox.hot { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent); }
+  .bigbox.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .bigbox.dim { opacity: .35; }
+  .barrow { font-size: 24px; color: #4a4f72; font-weight: 700; }
+  .barrow small { display: block; font-size: 9px; letter-spacing: .04em; color: #565b85; text-align: center; }
+
+  /* ---- code panel ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 6px 12px 0; overflow-x: auto; }
+  .code-line {
+    display: flex; font-size: 12.5px; line-height: 1.7; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .4;
+    font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  .code-line .ln { width: 34px; text-align: right; padding-right: 12px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; }
+  .c-num { color: #e0a06b; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body b { color: var(--ink); }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } .picture { flex-direction: column; } .barrow { transform: rotate(90deg); } }
+
+  /* ════ GLOSSARY TERM SYSTEM ════ */
+  .term {
+    color: #cbd2ff; border-bottom: 1px dotted #8b9bff; cursor: help;
+    position: relative; white-space: nowrap; border-radius: 2px;
+  }
+  .term:hover, .term:focus { color: #fff; background: rgba(139,155,255,.12); outline: none; }
+  .term .sup { font-size: .62em; vertical-align: super; color: var(--accent); margin-left: 1px; font-weight: 700; }
+
+  /* floating popover — single shared element, positioned by JS */
+  #pop {
+    position: fixed; z-index: 1000; max-width: 320px; width: max-content;
+    background: #0b0c14; border: 1px solid var(--accent); border-radius: 11px;
+    padding: 12px 14px; box-shadow: 0 14px 40px -10px rgba(0,0,0,.8), 0 0 0 1px rgba(139,155,255,.25);
+    opacity: 0; pointer-events: none; transform: translateY(4px);
+    transition: opacity .13s, transform .13s; font-size: 13px; line-height: 1.5;
+  }
+  #pop.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+  #pop .pl { font-weight: 700; color: var(--accent); font-size: 13px; margin-bottom: 5px; }
+  #pop .pd { color: var(--ink); }
+  #pop .pd .term { white-space: normal; }
+  #pop::after {
+    content: ""; position: absolute; width: 10px; height: 10px; background: #0b0c14;
+    border: 1px solid var(--accent); transform: rotate(45deg);
+  }
+  #pop.below::after { top: -6px; left: var(--ax, 24px); border-right: none; border-bottom: none; }
+  #pop.above::after { bottom: -6px; left: var(--ax, 24px); border-left: none; border-top: none; }
+
+  /* ---- glossary drawer ---- */
+  .gloss-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 900; }
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100%; width: 360px; max-width: 90vw;
+    background: var(--panel); border-left: 1px solid var(--line); z-index: 950;
+    transform: translateX(100%); transition: transform .25s; overflow-y: auto;
+    padding: 22px 20px 40px;
+  }
+  .drawer.open { transform: translateX(0); box-shadow: -20px 0 50px -20px rgba(0,0,0,.7); }
+  .drawer h2 { font-size: 16px; margin-bottom: 4px; }
+  .drawer .dh { color: var(--ink-dim); font-size: 12px; margin-bottom: 16px; }
+  .gloss-item { border-top: 1px solid var(--line); padding: 11px 0; }
+  .gloss-item .gl { font-weight: 700; color: #cbd2ff; font-size: 13.5px; }
+  .gloss-item .gd { color: var(--ink-dim); font-size: 12.5px; margin-top: 3px; }
+  .drawer-close { position: absolute; top: 16px; right: 16px; padding: 4px 10px; }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 940; opacity: 0; pointer-events: none; transition: opacity .25s; }
+  .backdrop.open { opacity: 1; pointer-events: auto; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">OOP from zero · NestJS · dependency injection</div>
+  <h1>Objects, classes &amp; how Nest wires them together</h1>
+  <p class="sub">You've never written object-oriented code. That's fine — we start from "what even is an object" and build, one small idea per step, up to the real wiring in your ingestion code. Every underlined word is a pop-up: hover it, tap it, or focus it and hit Enter for a plain-English definition.</p>
+</header>
+
+<div class="parts" id="parts"></div>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+  <div class="stage-head" id="stage-head">Picture it</div>
+  <div class="picture" id="picture"></div>
+  <div class="code-panel" id="code" style="margin-top:16px; display:none;"></div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>The idea</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ In plain terms</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · click a dot or a chapter to jump · tap any underlined word for its meaning</p>
+
+<!-- shared popover -->
+<div id="pop" role="tooltip"><div class="pl"></div><div class="pd"></div></div>
+
+<!-- glossary drawer -->
+<button class="gloss-toggle primary" id="glossBtn">📖 Glossary</button>
+<div class="backdrop" id="backdrop"></div>
+<aside class="drawer" id="drawer" aria-label="Glossary">
+  <button class="drawer-close ghost" id="drawerClose">✕ close</button>
+  <h2>Glossary</h2>
+  <div class="dh">Every term used on this page, in plain English.</div>
+  <div id="glossList"></div>
+</aside>
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   GLOSSARY — every term, plain English, beginner analogies.
+   t('key','optional shown text') renders an inline pop-up term.
+   ════════════════════════════════════════════════════════════════ */
+const GLOSSARY = {
+  "oop": { label: "OOP (object-oriented programming)", def: "A style of writing programs where you bundle related data together with the actions that use it, into self-contained units called objects. Instead of loose data and loose functions, each thing knows its own stuff and what it can do." },
+  "object": { label: "object", def: "One self-contained thing in your program that holds some data and offers some actions. Like a real-world TV: it stores its current channel, and it can change channel — data plus things it can do, in one package." },
+  "class": { label: "class", def: "A blueprint for making objects. Like a cookie-cutter: the cutter isn't a cookie, but every cookie you press out has the same shape. The class describes what its objects will know and be able to do." },
+  "instance": { label: "instance", def: "One actual object built from a class. If the class is the cookie-cutter, an instance is one real cookie you made with it. You can make many instances from one class." },
+  "property": { label: "property (field)", def: "A piece of data an object stores about itself. For a Dog object, its name and age are properties. Also called a field. It's the 'what it knows' part." },
+  "method": { label: "method", def: "An action an object can do, written as a function that lives inside the object. For a Dog, bark() is a method. It's the 'what it can do' part." },
+  "constructor": { label: "constructor", def: "A special setup routine that runs once, automatically, the moment you build an object. It fills in the starting values. Think of it as the assembly line that puts a new object together before you use it." },
+  "this": { label: "this", def: "A word an object uses to talk about itself from the inside. Inside a Dog's method, this.name means 'my own name'. It's how an object refers to its own properties and methods." },
+  "new": { label: "new", def: "The keyword that actually builds an object from a class. new Dog() means 'use the Dog blueprint to make me one real dog right now'. It triggers the constructor." },
+  "encapsulation": { label: "encapsulation", def: "Keeping an object's data and the actions on that data together in one place, and hiding the messy internals. You press the TV's volume button without knowing the electronics inside — that hiding is encapsulation." },
+  "interface": { label: "interface", def: "A contract that lists what something must be able to do, with zero detail about how. Like a job description: 'must be able to make coffee' — it doesn't say which machine or beans. In code it names the required methods and nothing else." },
+  "contract": { label: "contract", def: "A promise about shape: 'anything calling itself an X must have these abilities'. Other code can rely on the contract without caring who fulfills it or how." },
+  "implementation": { label: "implementation", def: "The real, working version that actually does the job a contract describes. The contract says 'make coffee'; the implementation is the specific machine with all its wiring that really makes it." },
+  "implements": { label: "implements", def: "A keyword saying 'this class promises to fulfill that contract'. class Barista implements CoffeeMaker means Barista really provides every action CoffeeMaker requires — and the compiler checks it." },
+  "abstraction": { label: "abstraction", def: "Hiding details behind a simple idea so you can use something without knowing its insides. 'A car drives' is an abstraction — you steer without thinking about pistons. Interfaces are how code does this." },
+  "decorator": { label: "decorator", def: "A label you stick on a class (or method) that gives the framework extra instructions about it. Like a sticker on a box saying 'fragile' — the box is unchanged, but handlers now treat it specially. Written with an @ sign." },
+  "injectable": { label: "@Injectable()", def: "A decorator (sticker) that marks a class as 'the framework is allowed to build this for me and hand it to whoever asks'. Without it, Nest won't manage the class for you." },
+  "module-dec": { label: "@Module()", def: "A decorator that marks a class as a module — a labelled box telling Nest which related parts belong together and which it should build." },
+  "module": { label: "module", def: "A labelled box that groups related parts of your app (services, providers) so the framework knows what belongs together. Like organising a kitchen into zones: baking stuff here, coffee stuff there." },
+  "provider": { label: "provider", def: "Anything the framework knows how to build and hand out on request — usually a class marked injectable. 'Provider' = 'something I can provide to whoever needs it'." },
+  "dependency": { label: "dependency", def: "Something a piece of code needs in order to do its job. If your service needs a file-reader to work, the file-reader is its dependency. 'I depend on it.'" },
+  "di": { label: "dependency injection (DI)", def: "Instead of a class building its own helpers, it just lists what it needs, and the framework hands them over ready-made. Like a chef who asks for ingredients instead of growing them — someone delivers them to the bench." },
+  "container": { label: "DI container (IoC container)", def: "The framework's behind-the-scenes machine that knows how to build every object and plug them into each other. You declare needs; the container assembles the whole graph. Think of it as the wiring behind your wall sockets." },
+  "ioc": { label: "inversion of control", def: "Flipping who's in charge of creating things. Normally your code calls and builds what it needs. With IoC, you hand that control to the framework — it builds your objects and calls you. 'Don't call us, we'll call you.'" },
+  "inject": { label: "@Inject(token)", def: "A decorator used in a constructor to tell the container 'fetch the thing registered under this exact name-tag and give it to me here'. Needed when the type alone isn't enough to look it up." },
+  "token": { label: "injection token", def: "A real, unique name-tag the container uses to look up what to provide. When the thing you want is described only by an interface (which disappears at runtime), the token is the handle that still exists to ask by." },
+  "symbol": { label: "Symbol", def: "A JavaScript value that is guaranteed unique — no two Symbols are ever equal, even with the same description. Perfect as a name-tag that can never accidentally clash with someone else's." },
+  "custom-provider": { label: "custom provider", def: "A wiring instruction that says 'when someone asks for this name-tag, build this specific class for them'. It's how you connect a token to the actual implementation." },
+  "provide": { label: "provide", def: "In a wiring instruction, the lookup key — the name-tag (token) people will ask for. 'When someone asks for THIS...'" },
+  "useclass": { label: "useClass", def: "In a wiring instruction, what to actually build when that name-tag is requested. '...give them one of THIS class.'" },
+  "by-type": { label: "inject by type", def: "Letting the framework figure out what to give you just from the class name in your constructor. Works only when that thing is a real class that still exists when the program runs." },
+  "by-token": { label: "inject by token", def: "Asking for a dependency by its name-tag instead of its type. Needed when the type is an interface, which vanishes when the code runs, so there's nothing to match on but the tag." },
+  "runtime": { label: "runtime", def: "When your program is actually running — the live show. Whatever doesn't physically exist at runtime can't be looked up or used while the app is working." },
+  "compile-time": { label: "compile-time", def: "Before your program runs — while the tools are still translating and checking your code. Type checks happen here, then are thrown away before the live show." },
+  "transpile": { label: "compile / transpile (TS → JS)", def: "The step that translates TypeScript into plain JavaScript so it can run. During this translation, anything that was only there for type-checking gets stripped out." },
+  "type-erasure": { label: "type erasure", def: "The fact that TypeScript's type information (like interfaces) is deleted during the translation to JavaScript. The types help you while writing, then disappear — they're not in the running program." },
+  "typescript": { label: "TypeScript", def: "JavaScript with an extra layer that lets you label what shape your data is, so mistakes get caught while you write. Those labels are checked, then removed before the code runs." },
+  "javascript": { label: "JavaScript", def: "The language that actually runs in the browser and in Node. TypeScript gets translated down to it before anything executes." },
+  "configservice": { label: "ConfigService", def: "A ready-made Nest class whose job is to hand you configuration values, like settings read from a .env file. You ask it get('SOME_SETTING') and it returns the value." },
+  "envvar": { label: "environment variable", def: "A setting that lives outside your code, in the environment the app runs in. Lets you change behaviour (like a file path) without editing or rebuilding the program." },
+  "dotenv": { label: ".env file", def: "A plain text file listing environment variables as NAME=value lines. Keeps settings and secrets out of your source code so each machine can have its own." },
+  "logger": { label: "Logger", def: "A small tool for printing labelled status messages while the app runs, so you can see what happened. Nicer than scattering print statements — each line can be tagged with which part wrote it." },
+  "context-tag": { label: "context tag", def: "A label attached to each log line saying which part of the app wrote it, like [IngestionService]. Makes it easy to tell who said what in a busy log." },
+  "buffer": { label: "Buffer", def: "Node's container for raw bytes — the actual 1s and 0s of a file, before anyone decides they're text or an image. A PDF read from disk arrives as a Buffer." },
+  "promise": { label: "Promise", def: "A placeholder for a value that isn't ready yet but will be soon, like a receipt you swap for your order later. Used for things that take time, like reading a file." },
+  "async-await": { label: "async / await", def: "async marks a function as one that does slow work; await pauses inside it until a Promise's value is ready, so you can write waiting-for-stuff code as if it were step by step." },
+  "throw": { label: "throw", def: "Deliberately raising an error to stop the current work and signal 'something is wrong, do not continue'. Better to fail loudly than quietly carry on with bad data." },
+  "never": { label: "the never type", def: "A TypeScript type meaning 'this never produces a value — it always stops first (e.g. by throwing)'. It lets a throw branch not count as a possible return value, keeping the real return type clean." },
+  "seam": { label: "seam", def: "A planned place where you can swap one part for another without disturbing the rest, like a zip in a jacket. Here, the token+interface form a seam between the service and where bytes come from." },
+  "dependency-inversion": { label: "dependency inversion", def: "Designing code to depend on a contract, not on a specific concrete thing. Then any implementation that fits the contract can be plugged in. It's why swapping the byte-source is a one-line change." },
+  "onmoduleinit": { label: "OnModuleInit", def: "A Nest hook: if your class promises this, Nest calls its onModuleInit() method once at startup, after everything is wired up. A safe place to run start-up work." },
+  "process-cwd": { label: "process.cwd()", def: "The folder the app was started from ('current working directory'). Joining it with a relative path gives a full, absolute path the file system can find." },
+  "readfile": { label: "readFile", def: "A Node function that reads a file off disk and gives you back its bytes (as a Buffer). It takes time, so it returns a Promise you await." },
+  "node": { label: "Node (Node.js)", def: "The program that runs JavaScript outside a browser — on a server or your machine. It's what executes your Nest app and provides tools like file reading." }
+};
+
+/* render an inline glossary term */
+function t(key, shown){
+  const g = GLOSSARY[key];
+  const text = shown || (g ? g.label : key);
+  return '<span class="term" tabindex="0" role="button" data-term="'+key+'" aria-label="'+(g?g.label:key)+', definition">'+text+'<span class="sup">?</span></span>';
+}
+
+/* ════ syntax highlighter (extended with numbers) ════ */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw","interface","implements","private","readonly","public"]);
+const FN = new Set(["Promise","Buffer","Symbol","Logger","ConfigService","console","Map","Set","Array","Object","JSON","readFile","join","process"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\d+)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  el.innerHTML = "";
+  codeText.split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* the real TBA-2 code, verbatim-ish, trimmed for display */
+const CODE = [
+/*1 */ "// document-source.ts — the contract + the name-tag",
+/*2 */ "export interface DocumentSource {",
+/*3 */ "  getBytes(): Promise<Buffer>;",
+/*4 */ "}",
+/*5 */ "export const DOCUMENT_SOURCE = Symbol('DOCUMENT_SOURCE');",
+/*6 */ "",
+/*7 */ "// local-file.document-source.ts — one implementation",
+/*8 */ "@Injectable()",
+/*9 */ "export class LocalFileDocumentSource implements DocumentSource {",
+/*10*/ "  constructor(private configService: ConfigService) {}",
+/*11*/ "  async getBytes(): Promise<Buffer> {",
+/*12*/ "    const path = this.configService.get('POLICY_SAMPLE_PATH');",
+/*13*/ "    if (!path) throw new Error('POLICY_SAMPLE_PATH is not set');",
+/*14*/ "    return readFile(join(process.cwd(), path));",
+/*15*/ "  }",
+/*16*/ "}",
+/*17*/ "",
+/*18*/ "// ingestion.module.ts — bind the token to a class",
+/*19*/ "@Module({",
+/*20*/ "  providers: [",
+/*21*/ "    IngestionService,",
+/*22*/ "    { provide: DOCUMENT_SOURCE, useClass: LocalFileDocumentSource },",
+/*23*/ "  ],",
+/*24*/ "})",
+/*25*/ "export class IngestionModule {}",
+/*26*/ "",
+/*27*/ "// ingestion.service.ts — the consumer",
+/*28*/ "@Injectable()",
+/*29*/ "export class IngestionService implements OnModuleInit {",
+/*30*/ "  private readonly logger = new Logger(IngestionService.name);",
+/*31*/ "  constructor(",
+/*32*/ "    @Inject(DOCUMENT_SOURCE) private readonly source: DocumentSource,",
+/*33*/ "  ) {}",
+/*34*/ "  async onModuleInit() {",
+/*35*/ "    const bytes = await this.source.getBytes();",
+/*36*/ "    this.logger.log(bytes.byteLength);",
+/*37*/ "  }",
+/*38*/ "}",
+].join("\n");
+
+/* ════ STAGE pictures (analogy diagrams). Each returns HTML. ════ */
+function box(emoji, title, desc, cls){ return '<div class="bigbox '+(cls||'')+'"><span class="emoji">'+emoji+'</span><span class="bt">'+title+'</span><span class="bd">'+desc+'</span></div>'; }
+function arrow(label){ return '<div class="barrow">→'+(label?'<small>'+label+'</small>':'')+'</div>'; }
+
+const PIC = {
+  blank: "",
+  objectThing: box('📺','A TV','knows: channel 4<br>can do: change channel','hot'),
+  classVsInstance: box('🍪','Cookie-cutter<br>(class)','the blueprint','hot good') + arrow('press out') +
+                   box('🥠','Cookie #1<br>(instance)','a real one') + box('🍘','Cookie #2<br>(instance)','another real one'),
+  propMethod: box('🐶','Dog object','','hot') + arrow() +
+              box('🏷️','name, age','properties = what it knows','hot') + box('🔊','bark()','methods = what it can do','hot good'),
+  constructorPic: box('🏭','constructor','runs once when built<br>sets starting values','hot') + arrow('produces') + box('🐶','a ready Dog','name + age filled in'),
+  newPic: box('📋','class Dog','blueprint','dim') + arrow('new Dog()') + box('🐶','one real dog','an instance','hot'),
+  interfacePic: box('📝','Job description','"must make coffee"<br>(interface = contract)','hot') + arrow('vs') + box('🧑‍🍳','The actual hire','really makes it<br>(implementation)','dim'),
+  implementsPic: box('📝','CoffeeMaker','contract: makeCoffee()','dim') + arrow('implements') + box('☕','Barista','really has makeCoffee()','hot good'),
+  decoratorPic: box('📦','plain class','just code','dim') + arrow('add @sticker') + box('🏷️📦','@Injectable() class','now Nest manages it','hot'),
+  modulePic: box('🗄️','@Module box','groups related parts','hot') + box('🔧','IngestionService','inside it') + box('🔌','DOCUMENT_SOURCE','inside it'),
+  providerPic: box('🏭','DI container','knows how to build each part','hot') + arrow('hands out') + box('🔧','a built service','ready to use','good'),
+  diPic: box('🍳','Chef (your class)','"I need eggs + flour"','hot') + arrow('asks') + box('🛒','Kitchen (container)','delivers them ready','hot good'),
+  socketPic: box('🔌','You','"I need power"','hot') + arrow('plug in') + box('🏠','Wall socket (container)','wiring hidden behind it','hot good'),
+  // PART 3
+  contractRuntime: box('📝','DocumentSource','interface: getBytes()','hot'),
+  erasePic: box('📝','interface','exists while you write','dim') + arrow('compile to JS') + box('💨','...gone','erased at runtime','hot') ,
+  tokenPic: box('💨','interface erased','no value at runtime','dim') + arrow('replace with') + box('🏷️','DOCUMENT_SOURCE','a Symbol name-tag<br>survives at runtime','hot good'),
+  implPic: box('🏷️','DOCUMENT_SOURCE','the contract + tag','dim') + arrow('implements') + box('📄','LocalFileDocumentSource','reads a file → bytes','hot good'),
+  bindPic: box('🏷️','provide: TOKEN','the lookup key','hot') + arrow('useClass') + box('📄','LocalFileDocumentSource','build this for it','hot good'),
+  serviceAskPic: box('🔧','IngestionService','@Inject(TOKEN) source','hot') + arrow('asks for tag') + box('🏷️','DOCUMENT_SOURCE','the runtime name-tag','hot'),
+  bootPic: box('🔧','IngestionService','wants the token','hot') + arrow() + box('🏷️','TOKEN','→ useClass','hot') + arrow() + box('📄','LocalFileSource','needs ConfigService','hot') + arrow() + box('⚙️','ConfigService','built first','hot good'),
+  // PART 4
+  configContrast: box('🏷️','byte source','by TOKEN (interface, erased)','hot') + arrow('vs') + box('⚙️','ConfigService','by TYPE (real class, survives)','hot good'),
+  envPic: box('📄','.env','POLICY_SAMPLE_PATH=...','hot') + arrow('get()') + box('📂','full path','join(cwd, path)','hot') + arrow('readFile') + box('🧱','Buffer','257757 bytes','hot good'),
+  throwPic: box('❓','path missing?','','hot') + arrow('throw') + box('💥','stop loudly','type never → return stays Promise<Buffer>','hot bad'),
+  loggerPic: box('📢','Logger','new Logger("IngestionService")','hot') + arrow('tags lines') + box('📝','[IngestionService] 257757','context tag','hot good'),
+  payoffPic: box('🔧','IngestionService','UNCHANGED','dim good') + arrow('same token') + box('🏷️','TOKEN','same contract','dim') + arrow('useClass swapped') + box('☁️','AzureBlobDocumentSource','one-line change!','hot good'),
+  recapPic: box('🧱','objects + classes','','good') + box('📝','interfaces','','good') + box('🏷️','tokens','','good') + box('🍳','injection','','good') + box('🪡','the seam','','good')
+};
+
+/* ════ STEPS ════ */
+const steps = [
+ /* ─────────── PART 1 — OOP from scratch ─────────── */
+ { part:0,
+   head:"Picture it", pic:"objectThing", code:false,
+   title:"What is an object?",
+   text:"Start with no code at all. Think of a TV. It "+t('object','holds')+" two kinds of stuff: things it <b>knows</b> (it's on channel 4) and things it can <b>do</b> (change the channel). An "+t('object')+" in code is exactly that — one thing that bundles some data together with the actions that use that data.",
+   secHead:"★ In plain terms",
+   secondary:"Before "+t('oop')+", data and actions floated around separately. The big idea of "+t('oop')+" is to package them together so each thing minds its own business. That packaging-together is called "+t('encapsulation')+"." },
+
+ { part:0, head:"Picture it", pic:"classVsInstance", code:false,
+   title:"Class vs instance",
+   text:"You don't describe every TV from scratch — you have one design, then stamp out many. A "+t('class')+" is that design: the cookie-cutter. Each real cookie you press out is an "+t('instance')+". One "+t('class')+", many "+t('instance','instances')+", all the same shape but with their own values.",
+   secHead:"★ Watch the words",
+   secondary:"\"Dog\" the "+t('class')+" is the blueprint. \"Rex\" and \"Bella\" are two "+t('instance','instances')+" — real dogs with their own names. The "+t('class')+" itself is never a dog you can pet." },
+
+ { part:0, head:"Picture it", pic:"propMethod", code:false,
+   title:"Properties and methods",
+   text:"An "+t('object')+"'s two halves have names. The data it knows are its "+t('property','properties')+" (also called fields) — a Dog's name and age. The things it can do are its "+t('method','methods')+" — a Dog's bark(). Properties = nouns it owns; methods = verbs it performs.",
+   secHead:"★ Tiny example",
+   secondary:"<code>rex.name</code> reads a "+t('property')+". <code>rex.bark()</code> calls a "+t('method')+" (the <code>()</code> means 'do it'). Same dot, two different things." },
+
+ { part:0, head:"Picture it", pic:"constructorPic", code:false,
+   title:"The constructor",
+   text:"When you build a fresh "+t('object')+", something has to fill in its starting values — this dog's name is Rex, age 3. That setup routine is the "+t('constructor')+". It runs <b>once, automatically</b>, the moment the "+t('object')+" is created. Think factory assembly line: it puts the thing together, then it's ready.",
+   secHead:"★ Why it exists",
+   secondary:"Without a "+t('constructor')+" you'd build an empty object and then set every "+t('property')+" by hand. The "+t('constructor')+" does that setup in one go, so no object is ever born half-built." },
+
+ { part:0, head:"Picture it", pic:"propMethod", code:false,
+   title:"`this` — the object talking about itself",
+   text:"Inside a "+t('method')+" or "+t('constructor')+", code needs a way to say \"my own name\", not some other dog's. That word is "+t('this')+". <code>this.name</code> means \"the name of whichever object this code is running on right now\". It's the object pointing at itself.",
+   secHead:"★ Read it aloud",
+   secondary:"<code>this.name = name</code> in a "+t('constructor')+" reads: \"set <em>my</em> name "+t('property')+" to the name I was handed.\" The <code>this.</code> part is the \"my\"." },
+
+ { part:0, head:"Picture it", pic:"newPic", code:false,
+   title:"What `new` does",
+   text:"How do you actually go from blueprint to a real object? The "+t('new')+" keyword. <code>new Dog('Rex', 3)</code> means \"use the Dog "+t('class')+" to build me one real dog\". Behind the scenes "+t('new')+" creates a blank object and runs the "+t('constructor')+" to fill it in.",
+   secHead:"★ Hold this thought",
+   secondary:"Remember "+t('new')+" — it's the manual way to build objects. The whole point of "+t('di','dependency injection')+" (Part 2) is that you stop writing "+t('new')+" yourself and let the framework do it." },
+
+ { part:0, head:"Picture it", pic:"interfacePic", code:false,
+   title:"What is an interface?",
+   text:"Sometimes you care <b>what</b> something can do, not <b>how</b>. A coffee-shop job description says \"must be able to make coffee\" — it doesn't name a machine or beans. An "+t('interface')+" is exactly that: a "+t('contract')+" listing required abilities, with no implementation. Pure what, zero how.",
+   secHead:"★ Why bother",
+   secondary:"If your code only relies on the "+t('interface')+" (\"something that makes coffee\"), you can later swap in any worker who fits it. That's "+t('abstraction')+": depend on the idea, not the specific thing." },
+
+ { part:0, head:"Picture it", pic:"implementsPic", code:false,
+   title:"Implementation vs interface — `implements`",
+   text:"The "+t('interface')+" is the job description; the "+t('implementation')+" is the actual hire who really does the work. The keyword "+t('implements')+" links them: <code>class Barista implements CoffeeMaker</code> says \"Barista promises to provide every ability CoffeeMaker requires\" — and the checker enforces it.",
+   secHead:"★ The split that matters",
+   secondary:"One "+t('contract')+", many possible "+t('implementation','implementations')+". A Barista and a VendingMachine could both <code>implement CoffeeMaker</code>. Code written against the "+t('interface')+" doesn't care which it gets — remember this for Part 3." },
+
+ /* ─────────── PART 2 — NestJS building blocks ─────────── */
+ { part:1, head:"Picture it", pic:"decoratorPic", code:false,
+   title:"What is a decorator?",
+   text:"Nest is a framework, and it needs you to label your classes so it knows how to treat them. A "+t('decorator')+" is that label — a sticker you put on a class with an <code>@</code> sign. The class code is unchanged; the sticker just tells the framework \"handle this one specially\".",
+   secHead:"★ You'll see two soon",
+   secondary:t('injectable')+" — \"you may build and hand out this class\". "+t('module-dec')+" — \"this class groups related parts\". Both are just stickers carrying instructions for Nest." },
+
+ { part:1, head:"Picture it", pic:"modulePic", code:false,
+   title:"What is a module?",
+   text:"A real app has lots of parts. A "+t('module')+" is a labelled box that groups the related ones so Nest knows what belongs together — like organising a kitchen into a baking zone and a coffee zone. You mark a class as a box with the "+t('module-dec')+" sticker.",
+   secHead:"★ In our code",
+   secondary:"<code>IngestionModule</code> is the box for everything about reading the policy document. Inside it you list the parts Nest should build." },
+
+ { part:1, head:"Picture it", pic:"providerPic", code:false,
+   title:"What is a provider?",
+   text:"A "+t('provider')+" is anything Nest knows how to build and hand out when something asks for it — usually a class wearing the "+t('injectable')+" sticker. Read it literally: a provider is \"something the framework can <em>provide</em> to whoever needs it\".",
+   secHead:"★ Connect the dots",
+   secondary:"You register "+t('provider','providers')+" inside a "+t('module')+". So: the "+t('module')+" is the box, the "+t('provider','providers')+" are the things in the box that Nest can build on demand." },
+
+ { part:1, head:"Picture it", pic:"diPic", code:false,
+   title:"The big idea: dependency injection",
+   text:"Here's the heart of it. A class often needs helpers (its "+t('dependency','dependencies')+"). The old way: it builds them itself with "+t('new')+". The Nest way: it just <b>lists what it needs</b>, and the framework hands them over ready-made. A chef asks for eggs and flour; he doesn't go farm them. That hand-over is "+t('di')+".",
+   secHead:"★ Why flip it",
+   secondary:"If a class builds its own helper with "+t('new')+", it's welded to that exact one forever. If it only <em>asks</em>, you can change what it gets without touching the class. That freedom is the whole payoff — you'll feel it in Part 4." },
+
+ { part:1, head:"Picture it", pic:"socketPic", code:false,
+   title:"The container does the wiring",
+   text:"Who actually builds all those helpers and plugs them in? The "+t('container')+" — Nest's behind-the-scenes machine. You don't build your own electricity; you ask the wall socket and the hidden wiring delivers it. Handing that control to the framework is called "+t('ioc')+".",
+   secHead:"★ Name it",
+   secondary:"\"Normally my code is in charge of creating things; now the framework is.\" That reversal is "+t('ioc')+", and the "+t('container')+" is the thing doing the creating. Everything in Part 3 is just <em>telling the container what to build</em>." },
+
+ /* ─────────── PART 3 — the real TBA-2 story ─────────── */
+ { part:2, head:"The real code", pic:"contractRuntime", code:true, active:["L2","L3","L4"],
+   title:"The contract for \"give me bytes\"",
+   text:"Now your actual code. <code>DocumentSource</code> is an "+t('interface')+" — a "+t('contract')+" that says: \"whatever you are, you must have <code>getBytes()</code> that returns a "+t('promise')+" of a "+t('buffer')+".\" A "+t('buffer')+" is just Node's box of raw bytes. Notice there's no <em>how</em> here — no file, no path. Only the required ability.",
+   secHead:"✎ In code",
+   secondary:"Lines 2–4. This names the one capability <code>IngestionService</code> will depend on: something that can produce bytes. It deliberately doesn't say <em>where</em> the bytes come from." },
+
+ { part:2, head:"The real code", pic:"erasePic", code:true, active:["L2","L3","L4"],
+   tag:{kind:"bad", label:"the crux"},
+   title:"The catch: interfaces vanish when the code runs",
+   text:"Here's the tricky bit, gently. Your "+t('typescript')+" gets translated into plain "+t('javascript')+" before it runs — that step is "+t('transpile','compiling')+". During it, <b>all type info is deleted</b> ("+t('type-erasure')+"). An "+t('interface')+" is purely a "+t('compile-time')+" idea, so at "+t('runtime')+" there is <em>no</em> <code>DocumentSource</code> left to point at.",
+   secHead:"⚠ Why this is a problem",
+   secondary:"When the "+t('container')+" tries to wire things up at "+t('runtime')+", it can't ask \"give me a DocumentSource\" — that name no longer exists. We need a real thing that survives. That's the next step." },
+
+ { part:2, head:"The real code", pic:"tokenPic", code:true, active:["L5"],
+   title:"The fix: an injection token",
+   text:"Since the "+t('interface')+" evaporates, we make a real value to stand in for it: <code>DOCUMENT_SOURCE = Symbol('DOCUMENT_SOURCE')</code>. A "+t('symbol')+" is a guaranteed-unique JavaScript value — a perfect name-tag. This "+t('token')+" is the "+t('runtime')+" handle for \"the thing that satisfies the DocumentSource contract\". The "+t('container')+" <em>can</em> look this up, because it really exists when the app runs.",
+   secHead:"★ Why a Symbol, not a string",
+   secondary:"A plain string tag like <code>'DOCUMENT_SOURCE'</code> could accidentally collide with another library's identical string. A "+t('symbol')+" is unique by construction — it can never clash. Token = the runtime stand-in for a type that can't be one." },
+
+ { part:2, head:"The real code", pic:"implPic", code:true, active:["L8","L9"],
+   title:"A class that fulfils the contract",
+   text:"<code>LocalFileDocumentSource implements DocumentSource</code> is a real "+t('class')+" that actually provides the <code>getBytes()</code> the "+t('contract')+" promised — by reading a file. The "+t('injectable')+" sticker on top marks it as something the "+t('container')+" may build. This is the \"bytes come from disk\" answer.",
+   secHead:"★ Note",
+   secondary:"The "+t('implements')+" keyword makes the checker confirm this class really has a matching <code>getBytes()</code>. That check is "+t('compile-time')+" only — it has nothing to do with how the "+t('container')+" finds the class. The "+t('token')+" does that part." },
+
+ { part:2, head:"The real code", pic:"bindPic", code:true, active:["L20","L21","L22"],
+   title:"Bind the token to the class",
+   text:"This line is the "+t('custom-provider')+" — the wiring instruction: <code>{ provide: DOCUMENT_SOURCE, useClass: LocalFileDocumentSource }</code>. Read it as: \"when anyone asks the container for the <code>DOCUMENT_SOURCE</code> tag, build them a <code>LocalFileDocumentSource</code>.\" "+t('provide')+" is the lookup key; "+t('useclass')+" is what to construct.",
+   secHead:"★ Spot the contrast",
+   secondary:"<code>IngestionService</code> is in the list too (line 21) — but as a bare class name, because the "+t('container')+" can inject real classes "+t('by-type')+". Only the interface-backed dependency needs the "+t('token')+" form." },
+
+ { part:2, head:"The real code", pic:"serviceAskPic", code:true, active:["L31","L32","L33"],
+   title:"The service asks for the token",
+   text:"In the constructor: <code>@Inject(DOCUMENT_SOURCE) private readonly source: DocumentSource</code>. Two halves, two jobs. "+t('inject')+" tells the <em>container</em> which "+t('token')+" to fetch (the runtime lookup). The <code>: DocumentSource</code> part tells <em>"+t('typescript')+"</em> the shape, so your editor autocompletes <code>.getBytes()</code>. Tag for the machine; "+t('interface')+" for you.",
+   secHead:"⚠ Why @Inject is needed",
+   secondary:"Normally Nest reads the constructor's <em>type</em> to know what to inject. But here the type is an "+t('interface')+", erased at "+t('runtime')+" — so Nest would have nothing to look up. "+t('inject')+" supplies the runtime key the erased type can't." },
+
+ { part:2, head:"The real code", pic:"bootPic", code:true, active:["L29","L31","L32","L10","L22"],
+   tag:{kind:"good", label:"it connects"},
+   title:"Boot time: the container builds the chain",
+   text:"At startup Nest builds <code>IngestionService</code>. It sees the constructor wants the <code>DOCUMENT_SOURCE</code> "+t('token')+" → looks it up → the module said "+t('useclass')+" <code>LocalFileDocumentSource</code> → so it builds one → which itself needs "+t('configservice')+", so Nest builds <em>that</em> first. It resolves the chain, then hands the finished service its ready "+t('dependency')+".",
+   secHead:"★ The mental model",
+   secondary:"You never wrote a single "+t('new')+" for any of this. You declared needs; the "+t('container')+" built the whole graph in the right order. That's "+t('ioc')+" made concrete." },
+
+ /* ─────────── PART 4 — supporting cast & payoff ─────────── */
+ { part:3, head:"The real code", pic:"configContrast", code:true, active:["L10"],
+   title:"ConfigService: injected the plain way",
+   text:"Look at <code>LocalFileDocumentSource</code>'s own constructor: <code>constructor(private configService: ConfigService)</code>. <b>No token here.</b> "+t('configservice')+" is a real "+t('class')+" — it survives "+t('transpile','compilation')+" — so Nest injects it "+t('by-type')+", the plain way, just from the type name. Compare with the byte-source, which needed a "+t('token')+".",
+   secHead:"★ This contrast is gold",
+   secondary:"Same service, two injection styles side by side: byte-source comes in "+t('by-token')+" (an "+t('interface')+", erased), config comes in "+t('by-type')+" (a class, survives). Seeing both is the clearest way to feel the difference." },
+
+ { part:3, head:"The real code", pic:"envPic", code:true, active:["L12","L14"],
+   title:"From .env to bytes",
+   text:"<code>configService.get('POLICY_SAMPLE_PATH')</code> reads an "+t('envvar')+" from your "+t('dotenv','.env file')+" — the file path, kept outside the code. Then <code>join("+t('process-cwd','process.cwd()')+", path)</code> turns it into a full path, and "+t('readfile')+" returns the file's "+t('buffer')+". That Buffer is the <code>257757</code> bytes you saw logged.",
+   secHead:"★ Why .env",
+   secondary:"Keeping the path in an "+t('envvar')+" means each machine can point at its own file without editing code. The code reads the setting; the setting lives outside." },
+
+ { part:3, head:"The real code", pic:"throwPic", code:true, active:["L13"],
+   title:"Why throw when the path is missing",
+   text:"<code>if (!path) throw new Error(...)</code>. If the setting is missing, we "+t('throw')+" — a misconfigured app should die loudly, not limp on with bad data. Bonus: a "+t('throw')+" has type "+t('never')+" (it never returns a value), so that branch doesn't count as a possible return — the function's return type stays a clean "+t('promise')+"<"+t('buffer')+">.",
+   secHead:"⚠ The subtle win",
+   secondary:"Earlier you tried <code>if (path) return ...</code>, which let the function fall through to <code>undefined</code> and broke the "+t('promise')+"&lt;Buffer&gt; "+t('contract')+". "+t('throw','Throwing')+" removes that undefined branch. Fixing the intent fixed the type." },
+
+ { part:3, head:"The real code", pic:"loggerPic", code:true, active:["L30"],
+   title:"Why Logger is `new`ed, not injected",
+   text:"<code>private readonly logger = new Logger(IngestionService.name)</code> — plain "+t('new')+", no "+t('di')+". Why break the pattern? Because "+t('logger')+" is <b>fixed infrastructure</b>: there's no second version you'd ever swap in, so there's nothing to invert. And the constructor argument sets the "+t('context-tag')+" — that's why every log line prints <code>[IngestionService]</code>.",
+   secHead:"★ The decision rule",
+   secondary:"<b>Inject</b> what varies or needs faking in tests (the byte source). <b>"+t('new')+"</b> what's fixed and contextual (the logger). Injecting "+t('logger')+" would cost a registration <em>and</em> lose the auto "+t('context-tag')+" — more ceremony, worse output, no benefit." },
+
+ { part:3, head:"The real code", pic:"payoffPic", code:true, active:["L22"],
+   tag:{kind:"good", label:"the payoff"},
+   title:"The payoff: swap one line, service untouched",
+   text:"TBA-3 adds <code>AzureBlobDocumentSource implements DocumentSource</code> and changes <b>one line</b>: "+t('useclass')+" <code>AzureBlobDocumentSource</code>. That's it. <code>IngestionService</code> doesn't change a character — it still asks for the same "+t('token')+" and calls the same <code>getBytes()</code>. The "+t('seam')+" absorbed the change. This is "+t('dependency-inversion')+" paying off.",
+   secHead:"★ Step back and feel it",
+   secondary:"The service depends on the "+t('contract')+" (token + interface), never on a concrete class. Implementations plug in behind the "+t('token')+". All the indirection in Part 3 existed to buy you this one-line swap." },
+
+ { part:3, head:"You now own this", pic:"recapPic", code:false,
+   tag:{kind:"good", label:"recap"},
+   title:"Everything you now understand",
+   text:"From zero: an "+t('object')+" bundles data and actions; a "+t('class')+" is its blueprint, an "+t('instance')+" a real one; "+t('property','properties')+" and "+t('method','methods')+"; the "+t('constructor')+", "+t('this')+", and "+t('new')+"; an "+t('interface')+" is a "+t('contract')+", a class "+t('implements')+" it.",
+   secHead:"★ ...and the Nest layer",
+   secondary:t('decorator','Decorators')+" · "+t('module','modules')+" &amp; "+t('provider','providers')+" · "+t('di')+" and the "+t('container')+" ("+t('ioc')+") · why types erase · "+t('token','tokens')+" &amp; "+t('symbol','Symbols')+" · "+t('inject','@Inject')+" · "+t('custom-provider','custom providers')+" · "+t('by-type','inject by type')+" vs "+t('by-token','by token')+" · "+t('new')+" vs inject · the "+t('seam')+" &amp; "+t('dependency-inversion')+". Re-run the page once and it'll click." }
+];
+
+const PART_LABELS = ["Part 1 · OOP from scratch","Part 2 · Nest building blocks","Part 3 · the real code","Part 4 · supporting cast & payoff"];
+
+/* ════ render stage ════ */
+function renderStage(step){
+  document.getElementById('stage-head').textContent = step.head || 'Picture it';
+  document.getElementById('picture').innerHTML = PIC[step.pic] || "";
+  const codeEl = document.getElementById('code');
+  codeEl.style.display = step.code ? "block" : "none";
+  document.getElementById('sec-head').textContent = step.secHead || '★ In plain terms';
+}
+
+/* ════ chapter chips ════ */
+const partsWrap = document.getElementById('parts');
+PART_LABELS.forEach((lbl, p) => {
+  const c = document.createElement('div');
+  c.className = 'part-chip'; c.textContent = lbl; c.dataset.part = p;
+  c.onclick = () => { stop(); const idx = steps.findIndex(s => s.part === p); if (idx>=0) go(idx); };
+  partsWrap.appendChild(c);
+});
+
+/* ════ stepper engine ════ */
+buildCode("code", CODE);
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((s, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot p" + (s.part + 1);
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? (s.tag.kind === "good" ? "good" : "bad") : "";
+  document.querySelectorAll(".code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+  hidePop();
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  partsWrap.querySelectorAll(".part-chip").forEach((c) => {
+    c.classList.toggle("active", Number(c.dataset.part) === s.part);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+
+  // scroll first highlighted code line into view
+  const firstCode = (s.active || []).find(id => id[0] === 'L');
+  if (firstCode && s.code) { const el = document.getElementById(firstCode); if (el) el.scrollIntoView({block:"nearest"}); }
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 5200);
+};
+document.addEventListener("keydown", e => {
+  if (e.target && e.target.classList && e.target.classList.contains('term')) return; // let term handle its own keys
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+/* ════════════════════════════════════════════════════════════════
+   GLOSSARY POP-UP SYSTEM
+   - one shared #pop element, positioned by JS, flips above/below
+   - hover (desktop) shows; click/tap toggles & pins; Esc / outside-click closes
+   - keyboard: term is focusable, Enter/Space toggles
+   ════════════════════════════════════════════════════════════════ */
+const pop = document.getElementById('pop');
+const popLabel = pop.querySelector('.pl');
+const popDef = pop.querySelector('.pd');
+let pinned = null;        // the term element currently click-pinned (null = none)
+let hoverTerm = null;     // term currently hovered
+
+function fillPop(key){
+  const g = GLOSSARY[key];
+  if (!g) { popLabel.textContent = key; popDef.textContent = "(no definition)"; return; }
+  popLabel.textContent = g.label;
+  popDef.innerHTML = g.def; // defs may contain nested terms
+}
+
+function positionPop(termEl){
+  // measure after it's visible
+  const r = termEl.getBoundingClientRect();
+  const pr = pop.getBoundingClientRect();
+  const margin = 8;
+  // horizontal: align left edge to term, clamp into viewport
+  let left = r.left;
+  if (left + pr.width > window.innerWidth - margin) left = window.innerWidth - margin - pr.width;
+  if (left < margin) left = margin;
+  // vertical: prefer below; flip above if not enough room
+  let top, place;
+  if (r.bottom + pr.height + margin < window.innerHeight) {
+    top = r.bottom + margin; place = 'below';
+  } else if (r.top - pr.height - margin > 0) {
+    top = r.top - pr.height - margin; place = 'above';
+  } else {
+    top = r.bottom + margin; place = 'below';
+  }
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+  pop.classList.remove('above','below');
+  pop.classList.add(place);
+  // arrow x: point at the term, relative to popover left
+  const ax = Math.max(12, Math.min(pr.width - 22, r.left - left + 10));
+  pop.style.setProperty('--ax', ax + 'px');
+}
+
+function showPop(termEl){
+  fillPop(termEl.dataset.term);
+  pop.classList.add('show');
+  // need it laid out to measure; it's already display via opacity, so size is known
+  positionPop(termEl);
+}
+function hidePop(){
+  pop.classList.remove('show');
+  pinned = null;
+  hoverTerm = null;
+}
+
+/* event delegation on the whole document for terms */
+document.addEventListener('mouseover', e => {
+  const term = e.target.closest && e.target.closest('.term');
+  if (!term) return;
+  if (pinned) return;           // a click-pinned popover wins; ignore hover
+  hoverTerm = term;
+  showPop(term);
+});
+document.addEventListener('mouseout', e => {
+  const term = e.target.closest && e.target.closest('.term');
+  if (!term) return;
+  if (pinned) return;
+  // moving into the popover itself shouldn't hide; check relatedTarget
+  const to = e.relatedTarget;
+  if (to && (pop.contains(to) || (to.closest && to.closest('.term') === term))) return;
+  if (hoverTerm === term) { hidePop(); }
+});
+
+/* click / tap toggles a pinned popover */
+document.addEventListener('click', e => {
+  const term = e.target.closest && e.target.closest('.term');
+  if (term) {
+    e.stopPropagation();
+    if (pinned === term) { hidePop(); }     // click same term again → close
+    else { pinned = term; showPop(term); }
+    return;
+  }
+  // click anywhere else (not inside popover) closes a pinned popover
+  if (!pop.contains(e.target)) {
+    if (pinned) hidePop();
+  }
+});
+
+/* keyboard on terms: Enter/Space toggle, Esc close */
+document.addEventListener('keydown', e => {
+  const term = e.target.closest && e.target.closest('.term');
+  if (term && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    if (pinned === term) hidePop();
+    else { pinned = term; showPop(term); }
+    return;
+  }
+  if (e.key === 'Escape') { hidePop(); closeDrawer(); }
+});
+
+/* reposition pinned popover on scroll/resize so it never drifts off */
+window.addEventListener('scroll', () => { if (pinned) positionPop(pinned); else if (hoverTerm && pop.classList.contains('show')) positionPop(hoverTerm); }, true);
+window.addEventListener('resize', () => { if (pinned) positionPop(pinned); });
+
+/* ════ glossary drawer ════ */
+const drawer = document.getElementById('drawer');
+const backdrop = document.getElementById('backdrop');
+const glossList = document.getElementById('glossList');
+Object.keys(GLOSSARY).sort((a,b)=>GLOSSARY[a].label.toLowerCase().localeCompare(GLOSSARY[b].label.toLowerCase())).forEach(key => {
+  const g = GLOSSARY[key];
+  const item = document.createElement('div');
+  item.className = 'gloss-item';
+  item.innerHTML = '<div class="gl">'+g.label+'</div><div class="gd">'+g.def+'</div>';
+  glossList.appendChild(item);
+});
+function openDrawer(){ drawer.classList.add('open'); backdrop.classList.add('open'); }
+function closeDrawer(){ drawer.classList.remove('open'); backdrop.classList.remove('open'); }
+document.getElementById('glossBtn').onclick = (e) => { e.stopPropagation(); drawer.classList.contains('open') ? closeDrawer() : openDrawer(); };
+document.getElementById('drawerClose').onclick = closeDrawer;
+backdrop.onclick = closeDrawer;
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NestJS DI — the ingestion seam</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 760px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 24px 26px; min-height: 280px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 12px 14px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 13.5px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 11.5px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+
+  /* ---- flow diagram ---- */
+  .flow { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .flow .node { flex: 1; min-width: 130px; }
+  .arrow { align-self: center; color: #4a4f72; font-size: 20px; font-weight: 700; flex: none; }
+  .arrow small { display:block; font-size: 9px; letter-spacing: .04em; color:#3f4368; text-align:center; }
+  .aside { margin-top: 10px; }
+  .aside .node { max-width: 280px; }
+
+  /* ---- code panel ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 6px 12px 0; overflow-x:auto; }
+  .code-line {
+    display: flex; font-size: 12.5px; line-height: 1.7; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .4;
+    font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  .code-line .ln { width: 34px; text-align: right; padding-right: 12px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body b { color: var(--ink); }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">NestJS · dependency injection · TBA-2</div>
+  <h1>How Nest wires your ingestion code together</h1>
+  <p class="sub">You declare <em>what</em> you need; Nest decides <em>which object</em> to hand you and builds it.
+  This page follows one request for the policy PDF's bytes through every piece of wiring you typed — slowly, one idea per step.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+  <div class="flow">
+    <div class="node" id="node-svc">
+      <div class="n-title">IngestionService</div>
+      <div class="n-desc">needs bytes; asks, never builds</div>
+    </div>
+    <div class="arrow">→<small>@Inject(token)</small></div>
+    <div class="node" id="node-token">
+      <div class="n-title">DOCUMENT_SOURCE</div>
+      <div class="n-desc">the token (a Symbol)</div>
+    </div>
+    <div class="arrow">→<small>useClass</small></div>
+    <div class="node" id="node-impl">
+      <div class="n-title" id="impl-title">LocalFileDocumentSource</div>
+      <div class="n-desc">the implementation</div>
+    </div>
+    <div class="arrow">→<small>injects</small></div>
+    <div class="node" id="node-config">
+      <div class="n-title">ConfigService + .env</div>
+      <div class="n-desc">supplies the path</div>
+    </div>
+  </div>
+  <div class="aside">
+    <div class="node" id="node-logger">
+      <div class="n-title">Logger</div>
+      <div class="n-desc">not injected — <code>new</code>ed inside the service</div>
+    </div>
+  </div>
+
+  <div class="code-panel" id="code" style="margin-top:18px;"></div>
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ Why it matters</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · click a dot to jump</p>
+
+<script>
+/* ── syntax highlighter (unchanged) ──────── */
+const KW = new Set(["import","from","export","function","async","const","let","var",
+  "return","await","try","catch","finally","new","if","else","for","while","class","throw"]);
+const FN = new Set(["useState","Promise","console","Map","Set","Array","Object","JSON"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+= KW.has(m[3])?'<span class="c-kw">'+m[3]+'</span>'
+                     : FN.has(m[3])?'<span class="c-fn">'+m[3]+'</span>': esc(m[3]);
+    else out+=esc(m[4]);
+  }
+  return out;
+}
+function buildCode(targetId, codeText){
+  const el = document.getElementById(targetId);
+  codeText.split("\n").forEach((line,i)=>{
+    const row=document.createElement("div");
+    row.className="code-line"; row.id="L"+(i+1);
+    row.innerHTML='<span class="ln">'+(i+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span>';
+    el.appendChild(row);
+  });
+}
+
+const CODE = [
+/*1 */ "// document-source.ts ── the contract + the name tag",
+/*2 */ "export interface DocumentSource {",
+/*3 */ "  getBytes(): Promise<Buffer>;",
+/*4 */ "}",
+/*5 */ "export const DOCUMENT_SOURCE = Symbol('DOCUMENT_SOURCE');",
+/*6 */ "",
+/*7 */ "// local-file.document-source.ts ── one implementation",
+/*8 */ "@Injectable()",
+/*9 */ "export class LocalFileDocumentSource implements DocumentSource {",
+/*10*/ "  constructor(private configService: ConfigService) {}",
+/*11*/ "  async getBytes(): Promise<Buffer> {",
+/*12*/ "    const path = this.configService.get('POLICY_SAMPLE_PATH');",
+/*13*/ "    if (!path) throw new Error('POLICY_SAMPLE_PATH is not set');",
+/*14*/ "    return readFile(join(process.cwd(), path));",
+/*15*/ "  }",
+/*16*/ "}",
+/*17*/ "",
+/*18*/ "// ingestion.module.ts ── bind the token to a class",
+/*19*/ "@Module({",
+/*20*/ "  providers: [",
+/*21*/ "    IngestionService,",
+/*22*/ "    { provide: DOCUMENT_SOURCE, useClass: LocalFileDocumentSource },",
+/*23*/ "  ],",
+/*24*/ "})",
+/*25*/ "export class IngestionModule {}",
+/*26*/ "",
+/*27*/ "// ingestion.service.ts ── the consumer",
+/*28*/ "@Injectable()",
+/*29*/ "export class IngestionService implements OnModuleInit {",
+/*30*/ "  private readonly logger = new Logger(IngestionService.name);",
+/*31*/ "  constructor(",
+/*32*/ "    @Inject(DOCUMENT_SOURCE) private readonly source: DocumentSource,",
+/*33*/ "  ) {}",
+/*34*/ "  async onModuleInit() {",
+/*35*/ "    const bytes = await this.source.getBytes();",
+/*36*/ "    this.logger.log(bytes.byteLength);",
+/*37*/ "  }",
+/*38*/ "}",
+].join("\n");
+
+const steps = [
+  {
+    title: "The one idea behind all of it",
+    active: ["node-svc"],
+    text: "Your <code>IngestionService</code> needs the policy PDF's bytes. The naive way is to build its own helper: <code>new LocalFileDocumentSource()</code>. Nest's way is the opposite — the service <b>declares what it needs</b> in its constructor, and Nest hands it a ready-built object at startup. That hand-it-to-you machine is the <b>DI container</b> (DI = dependency injection). Everything else here is just <em>how the container knows what to build</em>.",
+    secHead: "★ Why it matters",
+    secondary: "If the service builds its own dependency, it's welded to that exact one. If it only <em>asks</em>, you can swap what it gets — disk now, Azure later — without touching the service. That swap is the entire point of TBA-2."
+  },
+  {
+    title: "A dependency you'd want to swap",
+    active: ["node-svc","node-impl","node-config"],
+    text: "\"Where do the bytes come from?\" has more than one answer: a local file today, an Azure blob in TBA-3. That's the tell-tale sign of something worth <b>inverting</b> — a moving part. So instead of the service knowing about files, we put a <b>seam</b> between it and the source of bytes. The next steps build that seam.",
+    secHead: "★ Rule of thumb",
+    secondary: "Inject things that have more than one possible implementation (the byte source). Don't bother for fixed infrastructure — you'll see that with <code>Logger</code> at the end."
+  },
+  {
+    title: "The contract: an interface",
+    active: ["L2","L3","L4"],
+    text: "An <b>interface</b> is a promise about shape, with no implementation: \"whatever a <code>DocumentSource</code> is, it has a <code>getBytes()</code> that returns a <code>Promise&lt;Buffer&gt;</code>.\" A <code>Buffer</code> is Node's raw-bytes container. The interface names the capability the service depends on — not the file-reading details.",
+    secHead: "✎ In code",
+    secondary: "<code>document-source.ts</code> lines 2–4. Notice there's no <em>how</em> here — no <code>readFile</code>, no path. Just the shape. That's deliberate."
+  },
+  {
+    title: "The catch: interfaces vanish at runtime",
+    tag: { kind: "bad", label: "the crux" },
+    active: ["L2","L3","L4"],
+    text: "TypeScript compiles to JavaScript, and during that step <b>all type information is erased</b>. An <code>interface</code> is purely a compile-time idea — there is <em>no</em> <code>DocumentSource</code> value left in the running JS. So when the container tries to wire things up at runtime, it cannot look up \"give me a DocumentSource\" — that name doesn't exist anymore. This is the problem the next step solves.",
+    secHead: "⚠ Gotcha",
+    secondary: "Classes survive compilation (they become real JS functions), so Nest <em>can</em> inject those by type. Interfaces and type aliases do not survive. That asymmetry is the whole reason tokens exist."
+  },
+  {
+    title: "The fix: an injection token",
+    active: ["L5","node-token"],
+    text: "Since the interface evaporates, we create a real runtime value to stand in for it: <code>DOCUMENT_SOURCE = Symbol('DOCUMENT_SOURCE')</code>. A <b>Symbol</b> is a guaranteed-unique JavaScript value — perfect as a name tag. This token is the runtime handle for \"the thing that satisfies the DocumentSource contract.\" The container can look <em>this</em> up, because unlike the interface, it actually exists when the code runs.",
+    secHead: "★ Why a Symbol",
+    secondary: "A string like <code>'DOCUMENT_SOURCE'</code> works too, but two libraries could pick the same string and collide. A <code>Symbol</code> is unique by construction, so it can never clash. Token = the runtime stand-in for a type that can't be one."
+  },
+  {
+    title: "An implementation of the contract",
+    active: ["L8","L9","node-impl"],
+    text: "<code>LocalFileDocumentSource</code> is a real class that <code>implements DocumentSource</code> — it actually provides the <code>getBytes()</code> the contract promised, by reading a file. <code>@Injectable()</code> is the decorator that marks a class as something the container is allowed to build and inject. This is the \"bytes come from disk\" answer; TBA-3 will add a second class for \"bytes come from Azure.\"",
+    secHead: "✎ In code",
+    secondary: "<code>implements DocumentSource</code> makes TypeScript check this class really has a matching <code>getBytes()</code>. That check is compile-time only — it has nothing to do with how the container finds the class. The token does that."
+  },
+  {
+    title: "Bind the token to the class",
+    active: ["L20","L21","L22","node-token","node-impl"],
+    text: "This is the <b>custom provider</b> — the wiring instruction: <code>{ provide: DOCUMENT_SOURCE, useClass: LocalFileDocumentSource }</code> reads as \"when anyone asks the container for the <code>DOCUMENT_SOURCE</code> token, build and give them a <code>LocalFileDocumentSource</code>.\" <code>provide</code> is the lookup key (the token); <code>useClass</code> is what to construct for it.",
+    secHead: "★ The swap point",
+    secondary: "<code>IngestionService</code> sits in <code>providers</code> too (line 21) — but as a bare class, because the container can inject classes by type directly. Only the interface-backed dependency needs the token form."
+  },
+  {
+    title: "The service asks for the token",
+    active: ["L31","L32","L33","node-svc","node-token"],
+    text: "In the constructor: <code>@Inject(DOCUMENT_SOURCE) private readonly source: DocumentSource</code>. Two halves doing different jobs. <code>@Inject(DOCUMENT_SOURCE)</code> tells the <em>container</em> which token to resolve (the runtime lookup). <code>: DocumentSource</code> tells <em>TypeScript</em> the shape of <code>source</code>, so your editor autocompletes <code>.getBytes()</code> and type-checks it. Token for the machine; interface for you.",
+    secHead: "⚠ Why @Inject is required",
+    secondary: "Normally Nest reads the constructor's <em>type</em> to know what to inject. But the type here is an interface, which is gone at runtime — so Nest would have nothing to look up. <code>@Inject(token)</code> supplies the runtime key the erased type can't."
+  },
+  {
+    title: "Boot time: the container resolves the chain",
+    tag: { kind: "good", label: "it all connects" },
+    active: ["node-svc","node-token","node-impl","node-config"],
+    text: "When the app starts, Nest builds <code>IngestionService</code>. It sees the constructor wants the <code>DOCUMENT_SOURCE</code> token → looks it up → the module said <code>useClass: LocalFileDocumentSource</code> → so it builds one of those → which itself needs <code>ConfigService</code>, so Nest builds that first. The chain resolves right-to-left, then hands the finished service its ready dependency.",
+    secHead: "★ The mental model",
+    secondary: "You never write <code>new</code> for any of this. You declare needs; the container does a topological build of the whole graph in dependency order. That's \"inversion of control\" made concrete."
+  },
+  {
+    title: "How the implementation gets its path",
+    active: ["L10","L12","node-config"],
+    text: "<code>LocalFileDocumentSource</code> has its own dependency: <code>constructor(private configService: ConfigService)</code>. Notice — <b>no token here</b>. <code>ConfigService</code> is a real class (it survives compilation), so Nest injects it by type, the plain way. It reads <code>POLICY_SAMPLE_PATH</code> from your <code>.env</code> via <code>configService.get(...)</code>.",
+    secHead: "★ Contrast",
+    secondary: "Same service, two injection styles side by side: the byte-source comes in by <em>token</em> (interface, erased), the config comes in by <em>type</em> (class, survives). Seeing both in one file is the clearest way to feel the difference."
+  },
+  {
+    title: "From .env to bytes",
+    active: ["L12","L13","L14"],
+    text: "<code>get('POLICY_SAMPLE_PATH')</code> returns the relative path from <code>.env</code>. If it's missing we <b>throw</b> — a misconfigured app should die loudly, not limp on. Otherwise <code>join(process.cwd(), path)</code> turns it into an absolute path and <code>readFile</code> returns the <code>Buffer</code>. That Buffer is the <code>257757</code> bytes you see logged.",
+    secHead: "⚠ Why throw, not return undefined",
+    secondary: "Earlier you tried <code>if (path) return ...</code>, which let the function fall through to <code>undefined</code> and broke the <code>Promise&lt;Buffer&gt;</code> contract. <code>throw</code> is type <code>never</code> — no undefined branch — so the return type stays clean. Fixing intent fixed the type."
+  },
+  {
+    title: "The payoff: swap one line, service untouched",
+    tag: { kind: "good", label: "the seam works" },
+    active: ["L22","node-impl"],
+    implName: "AzureBlobDocumentSource",
+    text: "TBA-3 adds <code>AzureBlobDocumentSource implements DocumentSource</code> and changes <b>one line</b> — <code>useClass: AzureBlobDocumentSource</code>. That's it. <code>IngestionService</code> (lines 27–38) doesn't change a character: it still asks for the same token and calls the same <code>getBytes()</code>. The seam absorbed the change. This is <b>dependency inversion</b> paying off.",
+    secHead: "★ Step back",
+    secondary: "The service depends on the <em>contract</em> (the token + interface), never on a concrete class. Implementations plug in behind the token. Same pattern as the InversifyJS bindings you've done before — Nest just spells it <code>provide</code>/<code>useClass</code>."
+  },
+  {
+    title: "Why Logger is `new`ed, not injected",
+    active: ["L30","node-logger"],
+    implName: "LocalFileDocumentSource",
+    text: "<code>private readonly logger = new Logger(IngestionService.name)</code> — plain <code>new</code>, no DI. Why break the pattern? Because <code>Logger</code> is <b>fixed infrastructure</b>: there's no second implementation you'd ever swap in, so there's nothing to invert. And the constructor argument <code>IngestionService.name</code> sets the <b>context tag</b> — it's why every log line prints <code>[IngestionService]</code>, telling you which class spoke.",
+    secHead: "★ The decision rule",
+    secondary: "<b>Inject</b> what varies or needs mocking (the byte source). <b>`new`</b> what's fixed and contextual (the logger). Injecting <code>Logger</code> would cost a provider registration <em>and</em> lose the auto context tag — more ceremony, worse output, zero benefit."
+  },
+  {
+    title: "The whole chain, one breath",
+    active: ["node-svc","node-token","node-impl","node-config","node-logger"],
+    text: "Service <b>asks</b> for the <code>DOCUMENT_SOURCE</code> token → module says that token <b>means</b> <code>LocalFileDocumentSource</code> → the container <b>builds</b> it, first injecting <code>ConfigService</code> → which reads the path from <code>.env</code> → <code>getBytes()</code> reads the file → <code>257757</code> bytes logged under <code>[IngestionService]</code>. The interface gave you a contract; the token made it real at runtime; the provider chose the implementation. Swap the implementation, nothing upstream notices.",
+    secHead: "★ You now own",
+    secondary: "interface vs implementation · why types erase · tokens &amp; Symbols · <code>@Inject</code> · custom providers (<code>provide</code>/<code>useClass</code>) · inject-by-type vs inject-by-token · <code>new</code> vs inject. That's the cluster that lost you — re-run the page once and it'll click."
+  }
+];
+
+function renderStage(step){
+  document.getElementById('impl-title').textContent = step.implName || 'LocalFileDocumentSource';
+  document.getElementById('sec-head').textContent = step.secHead || '★ Why it matters';
+}
+
+/* ── stepper engine — unchanged ─────────────── */
+buildCode("code", CODE);
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? (s.tag.kind === "good" ? "good" : "bad") : "";
+  document.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+
+  // keep the highlighted code line in view
+  const firstCode = (s.active || []).find(id => id[0] === 'L');
+  if (firstCode) { const el = document.getElementById(firstCode); if (el) el.scrollIntoView({block:"nearest"}); }
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 3200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>
