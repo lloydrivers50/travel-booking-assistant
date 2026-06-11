@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<!-- Companion walkthrough — RAG ingest & storage, jargon unpacked for a beginner. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Where do the chunks live, and how does search find them?</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+  pre { background:#0b0c14; border:1px solid var(--line); border-radius:10px; padding:14px 16px;
+    font-size:12.5px; color:#cdd2ee; overflow:auto; line-height:1.7; }
+  pre .kw { color:#c79bff; } pre .ty { color:#5cd3a4; } pre .cm { color:#5b6080; } pre .st { color:#f6b657; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 820px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 26px 28px; min-height: 360px;
+  }
+  .view { display: none; }
+  .view.show { display: block; animation: fade .3s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* highlightable elements */
+  .hl { transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s; }
+  .hl.dim { opacity: .38; }
+  .hl.hot { transform: translateY(-3px); border-color: var(--accent) !important;
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent); opacity: 1; }
+
+  .node { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px; }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-sub { color: var(--ink-dim); font-size: 12px; margin-top: 4px; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 820px){ .grid3 { grid-template-columns: 1fr; } }
+
+  /* ---- pipeline ---- */
+  .pipe { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .pipe-step { flex: 1; min-width: 130px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 11px; padding: 13px 13px; position: relative; }
+  .pipe-arrow { display: flex; align-items: center; color: var(--accent); font-size: 20px; padding: 0 6px; }
+  .pipe-step .p-t { font-weight: 700; font-size: 13px; }
+  .pipe-step .p-d { color: var(--ink-dim); font-size: 11px; margin-top: 5px; }
+  .p-icon { font-size: 16px; }
+
+  /* ---- two-door layout ---- */
+  .dual { display: flex; gap: 16px; flex-wrap: wrap; }
+  .door { flex: 1; min-width: 260px; border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); background: var(--panel-2); }
+  .door h4 { font-size: 14px; margin-bottom: 4px; }
+  .door .d-tag { font-size: 11px; color: var(--ink-dim); margin-bottom: 12px; }
+  .door ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .door li { font-size: 12.5px; color: var(--ink-dim); padding-left: 16px; position: relative; }
+  .door li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); }
+  .door.kw { border-top: 3px solid var(--warn); }
+  .door.vec { border-top: 3px solid var(--good); }
+
+  /* ---- weight bars (TF/IDF) ---- */
+  .bars { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+  .bar-row { display: grid; grid-template-columns: 130px 1fr 60px; align-items: center; gap: 14px; }
+  .bar-word { font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
+  .bar-track { height: 16px; background: #0b0c14; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #5a78d6, #7d5fd0); }
+  .bar-fill.lo { background: #3a3f63; }
+  .bar-fill.hi { background: linear-gradient(90deg, #5a78d6, var(--good)); }
+  .bar-note { font-size: 11.5px; color: var(--ink-dim); }
+
+  /* ---- table ---- */
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.cmp th, table.cmp td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.cmp th { color: var(--ink-dim); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  table.cmp td.q { font-weight: 700; }
+  table.cmp thead th.kw { color: var(--warn); } table.cmp thead th.vec { color: var(--good); }
+
+  /* ---- svg diagrams ---- */
+  .diagram { display: flex; justify-content: center; }
+  svg text { font-family: -apple-system, "Segoe UI", sans-serif; }
+
+  /* ---- callout ---- */
+  .callout { border-left: 3px solid var(--good); background: rgba(92,211,164,.07);
+    border-radius: 8px; padding: 14px 16px; font-size: 13.5px; margin-top: 18px; }
+  .callout.warn { border-left-color: var(--warn); background: rgba(246,182,87,.07); }
+
+  /* ---- mental model ---- */
+  .unit-wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .unit { background: var(--panel-2); border: 2px solid var(--accent); border-radius: 12px;
+    padding: 14px 22px; text-align: center; box-shadow: 0 8px 26px -12px var(--accent); }
+  .unit .u-t { font-weight: 700; } .unit .u-s { font-size: 11.5px; color: var(--ink-dim); }
+  .attaches { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .attach { border: 1px solid var(--line); border-radius: 10px; padding: 11px 15px; min-width: 180px; background: var(--panel-2); }
+  .attach .a-k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); font-weight: 700; }
+  .attach .a-v { font-size: 12.5px; color: var(--ink-dim); margin-top: 3px; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body b { color: var(--ink); }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">RAG · ingest &amp; storage</div>
+  <h1>Where do the chunks live, and how does search find them?</h1>
+  <p class="sub">The companion to the accuracy page. That one was about <em>query time</em>. This one is the half before it:
+  how a document becomes rows in Postgres, and what every jargon word — tsvector, TF/IDF, ParadeDB, HNSW, IVFFlat — actually means.
+  One idea per step.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+
+  <!-- VIEW: pipeline -->
+  <div class="view" id="view-pipeline">
+    <div class="pipe">
+      <div class="pipe-step hl" id="pipe-parse"><div class="p-icon">📄</div><div class="p-t">Parse</div><div class="p-d">PDF → clean text + layout</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step hl" id="pipe-chunk"><div class="p-icon">✂️</div><div class="p-t">Chunk</div><div class="p-d">split into 300–800-token pieces</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step hl" id="pipe-enrich"><div class="p-icon">🏷️</div><div class="p-t">Enrich</div><div class="p-d">add titles, dates, IDs</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step hl" id="pipe-embed"><div class="p-icon">🔢</div><div class="p-t">Embed</div><div class="p-d">meaning → vector of numbers</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step hl" id="pipe-store"><div class="p-icon">🗄️</div><div class="p-t">Store</div><div class="p-d">one Postgres row per chunk</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step hl" id="pipe-index"><div class="p-icon">🔍</div><div class="p-t">Index ×2</div><div class="p-d">keyword + vector</div></div>
+    </div>
+    <div class="callout">
+      All of this runs <b>offline</b> — before any user types a question. It's a kitchen prep line:
+      you do the chopping once so that at dinner service (query time) every order is fast.
+    </div>
+  </div>
+
+  <!-- VIEW: the stored row -->
+  <div class="view" id="view-row">
+    <div class="grid3">
+      <div class="node hl" id="col-text"><div class="n-title">text</div><div class="n-sub">the chunk's words, as readable text. This is what keyword search reads.</div></div>
+      <div class="node hl" id="col-embed"><div class="n-title">embedding</div><div class="n-sub">the same chunk as ~1,536 numbers (a vector). Stored with <code>pgvector</code>. This is what meaning search reads.</div></div>
+      <div class="node hl" id="col-meta"><div class="n-title">metadata</div><div class="n-sub">labels: region, policy type, date, doc id. Stored as <code>JSONB</code>. This is what filtering reads.</div></div>
+    </div>
+    <pre style="margin-top:18px;"><span class="cm">-- one row = one chunk, three useful shapes of the same thing</span>
+<span class="kw">CREATE TABLE</span> chunks (
+  id        <span class="ty">bigserial</span>,
+  text      <span class="ty">text</span>,            <span class="cm">-- words  → keyword search</span>
+  embedding <span class="ty">vector(1536)</span>,    <span class="cm">-- numbers → meaning search (pgvector)</span>
+  metadata  <span class="ty">jsonb</span>            <span class="cm">-- labels  → filtering</span>
+);</pre>
+  </div>
+
+  <!-- VIEW: dual indexing -->
+  <div class="view" id="view-dual">
+    <div class="dual">
+      <div class="door kw hl" id="door-kw">
+        <h4>🔑 Keyword door</h4>
+        <div class="d-tag">reads the <code>text</code> column</div>
+        <ul>
+          <li>Matches the <b>actual words</b> you typed</li>
+          <li>Built with a <code>tsvector</code> index (Postgres full-text)</li>
+          <li>Unbeatable for exact things: codes, names, defined terms</li>
+        </ul>
+      </div>
+      <div class="door vec hl" id="door-vec">
+        <h4>🧭 Meaning door</h4>
+        <div class="d-tag">reads the <code>embedding</code> column</div>
+        <ul>
+          <li>Matches by <b>meaning</b>, even with no shared words</li>
+          <li>Built with a <code>pgvector</code> index (HNSW or IVFFlat)</li>
+          <li>Catches paraphrases: "get my money back" → "refund policy"</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      "Dual indexing" just means <b>two separate indexes over the same rows</b> — one per door.
+      You run both searches and merge the results. That merged search is what people call <b>hybrid</b>.
+    </div>
+  </div>
+
+  <!-- VIEW: TF/IDF -->
+  <div class="view" id="view-tfidf">
+    <p style="color:var(--ink-dim); font-size:13px; margin-bottom:16px;">
+      Keyword search needs to <b>rank</b> matches. TF/IDF is the classic rule for "how much should this word count?"
+      Watch the weight change as a word gets rarer:</p>
+    <div class="bars">
+      <div class="bar-row">
+        <span class="bar-word">"the"</span>
+        <div class="bar-track"><div class="bar-fill lo" style="width:8%"></div></div>
+        <span class="bar-note">in every doc → ~0</span>
+      </div>
+      <div class="bar-row">
+        <span class="bar-word">"allowance"</span>
+        <div class="bar-track"><div class="bar-fill" style="width:58%"></div></div>
+        <span class="bar-note">fairly common</span>
+      </div>
+      <div class="bar-row">
+        <span class="bar-word">"TT‑4471"</span>
+        <div class="bar-track"><div class="bar-fill hi" style="width:95%"></div></div>
+        <span class="bar-note">rare code → high</span>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:22px;">
+      <b>TF</b> = Term Frequency: how often the word appears in <em>this</em> document (more = more relevant).
+      <b>IDF</b> = Inverse Document Frequency: how rare the word is <em>across all</em> documents (rarer = more meaningful).
+      Multiply them. So a rare word that appears a lot in one doc scores highest; a word like "the" scores ~nothing.
+    </div>
+  </div>
+
+  <!-- VIEW: tsvector vs BM25 -->
+  <div class="view" id="view-bm25">
+    <table class="cmp">
+      <thead>
+        <tr><th>Aspect</th><th class="kw">Postgres <code>tsvector</code> (built-in)</th><th class="vec">Real BM25 (ParadeDB / pg_search)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="q">Scoring rule</td><td>basic TF/IDF-style (<code>ts_rank</code>)</td><td>full BM25 formula</td></tr>
+        <tr><td class="q">Repeated words</td><td>can over-reward repetition</td><td>saturates — the 10th "refund" adds little</td></tr>
+        <tr><td class="q">Long vs short docs</td><td>limited length handling</td><td>fairly penalises long docs</td></tr>
+        <tr><td class="q">Setup</td><td>none — it's in Postgres already</td><td>install an extension</td></tr>
+        <tr><td class="q">Good enough when…</td><td>most apps</td><td>ranking quality is mission-critical</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn">
+      <b>BM25</b> is the modern, smarter cousin of TF/IDF — same idea, but with two fixes: it stops repeated words running away with the score
+      ("saturation"), and it adjusts for document length. <b>ParadeDB</b> (which ships the <code>pg_search</code> extension) is a Postgres add-on
+      that gives you real BM25 inside your database. Plain Postgres only gives you the "good enough" TF/IDF version.
+    </div>
+  </div>
+
+  <!-- VIEW: HNSW -->
+  <div class="view" id="view-hnsw">
+    <div class="diagram">
+      <svg width="560" height="250" viewBox="0 0 560 250">
+        <!-- edges -->
+        <g stroke="#2c2f48" stroke-width="2">
+          <line x1="60" y1="60" x2="170" y2="40"/><line x1="170" y1="40" x2="300" y2="70"/>
+          <line x1="60" y1="60" x2="120" y2="150"/><line x1="120" y1="150" x2="240" y2="180"/>
+          <line x1="300" y1="70" x2="240" y2="180"/><line x1="300" y1="70" x2="430" y2="110"/>
+          <line x1="240" y1="180" x2="380" y2="200"/><line x1="430" y1="110" x2="500" y2="180"/>
+          <line x1="380" y1="200" x2="500" y2="180"/><line x1="430" y1="110" x2="380" y2="200"/>
+        </g>
+        <!-- search path -->
+        <g stroke="#5cd3a4" stroke-width="3">
+          <line x1="60" y1="60" x2="300" y2="70"/><line x1="300" y1="70" x2="430" y2="110"/><line x1="430" y1="110" x2="500" y2="180"/>
+        </g>
+        <!-- nodes -->
+        <g>
+          <circle cx="60"  cy="60"  r="13" fill="#1d2035" stroke="#8b9bff" stroke-width="2"/>
+          <circle cx="170" cy="40"  r="11" fill="#1d2035" stroke="#2c2f48" stroke-width="2"/>
+          <circle cx="300" cy="70"  r="11" fill="#1d2035" stroke="#2c2f48" stroke-width="2"/>
+          <circle cx="120" cy="150" r="11" fill="#1d2035" stroke="#2c2f48" stroke-width="2"/>
+          <circle cx="240" cy="180" r="11" fill="#1d2035" stroke="#2c2f48" stroke-width="2"/>
+          <circle cx="430" cy="110" r="11" fill="#1d2035" stroke="#2c2f48" stroke-width="2"/>
+          <circle cx="380" cy="200" r="11" fill="#1d2035" stroke="#2c2f48" stroke-width="2"/>
+          <circle cx="500" cy="180" r="15" fill="#16382b" stroke="#5cd3a4" stroke-width="3"/>
+        </g>
+        <text x="60"  y="100" fill="#8b9bff" font-size="12" text-anchor="middle">entry</text>
+        <text x="500" y="218" fill="#5cd3a4" font-size="12" text-anchor="middle">nearest ✓</text>
+      </svg>
+    </div>
+    <div class="callout">
+      <b>HNSW = Hierarchical Navigable Small World.</b> Every vector is a dot connected to a few nearby dots, forming a web.
+      To find the closest match, search <b>starts at an entry dot and "walks" along the links, always stepping toward the query</b> —
+      reaching the answer in a few hops instead of comparing against millions of dots. Fast, very accurate (high "recall"), uses more memory.
+      <b>It's the default choice today.</b>
+    </div>
+  </div>
+
+  <!-- VIEW: IVFFlat -->
+  <div class="view" id="view-ivf">
+    <div class="diagram">
+      <svg width="560" height="240" viewBox="0 0 560 240">
+        <!-- cells -->
+        <g fill="none" stroke="#2c2f48" stroke-dasharray="5 5" stroke-width="2">
+          <circle cx="120" cy="80" r="60"/><circle cx="320" cy="70" r="55"/><circle cx="250" cy="180" r="58"/><circle cx="450" cy="150" r="55"/>
+        </g>
+        <!-- highlighted cell -->
+        <circle cx="320" cy="70" r="55" fill="rgba(92,211,164,.08)" stroke="#5cd3a4" stroke-dasharray="5 5" stroke-width="2.5"/>
+        <!-- dots -->
+        <g fill="#44496f">
+          <circle cx="100" cy="70" r="5"/><circle cx="135" cy="95" r="5"/><circle cx="120" cy="55" r="5"/><circle cx="150" cy="70" r="5"/>
+          <circle cx="230" cy="170" r="5"/><circle cx="265" cy="195" r="5"/><circle cx="250" cy="160" r="5"/><circle cx="270" cy="180" r="5"/>
+          <circle cx="440" cy="140" r="5"/><circle cx="465" cy="165" r="5"/><circle cx="450" cy="130" r="5"/>
+        </g>
+        <g fill="#5cd3a4">
+          <circle cx="305" cy="60" r="5"/><circle cx="335" cy="80" r="5"/><circle cx="320" cy="50" r="5"/><circle cx="340" cy="65" r="5"/>
+        </g>
+        <!-- query -->
+        <text x="322" y="78" font-size="22" text-anchor="middle" fill="#f6b657">★</text>
+        <text x="322" y="150" font-size="12" text-anchor="middle" fill="#f6b657">query lands here →</text>
+        <text x="322" y="166" font-size="12" text-anchor="middle" fill="#5cd3a4">only this cell is searched</text>
+      </svg>
+    </div>
+    <div class="callout warn">
+      <b>IVFFlat</b> takes the other approach: it first sorts all vectors into a few <b>clusters ("cells")</b>. At query time it figures out which
+      cell the query falls in and <b>only searches that cell</b> — ignoring the rest. Faster to build and lighter on memory than HNSW, but it can
+      <b>miss</b> a true match sitting just over a cell border (slightly lower recall). Rule of thumb: <b>HNSW for quality, IVFFlat for tight memory budgets.</b>
+    </div>
+  </div>
+
+  <!-- VIEW: mental model -->
+  <div class="view" id="view-mental">
+    <div class="unit-wrap">
+      <div class="unit"><div class="u-t">A chunk = one "retrievable knowledge unit"</div><div class="u-s">a 300–800-token slice of a document</div></div>
+      <div style="color:var(--ink-dim); font-size:18px;">stored with three handles ↓</div>
+      <div class="attaches">
+        <div class="attach"><div class="a-k">meaning</div><div class="a-v">→ embedding (vector)</div></div>
+        <div class="attach"><div class="a-k">keywords</div><div class="a-v">→ text index (tsvector / BM25)</div></div>
+        <div class="attach"><div class="a-k">context</div><div class="a-v">→ metadata (JSONB)</div></div>
+      </div>
+      <div style="color:var(--ink-dim); font-size:18px;">which together unlock ↓</div>
+      <div class="attaches">
+        <div class="attach"><div class="a-k">hybrid retrieval</div><div class="a-v">keyword + meaning, fused</div></div>
+        <div class="attach"><div class="a-k">filtering</div><div class="a-v">narrow by region / date / type</div></div>
+        <div class="attach"><div class="a-k">reranking</div><div class="a-v">the next page picks up here</div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ Plain words</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ▶ Play to autoplay</p>
+
+<script>
+/* ════ steps ════ */
+const steps = [
+  {
+    title: "The whole prep line, in six moves",
+    view: "pipeline", active: [],
+    text: "Before anyone searches anything, each document runs through six steps: <b>Parse → Chunk → Enrich → Embed → Store → Index</b>. " +
+          "The output is rows in a Postgres table that are ready to be searched two different ways. We'll take one step per slide.",
+    secondary: "Why offline matters: this work is slow and only has to happen <b>once per document</b>. Doing it up front is what makes the actual user search feel instant.",
+    secHead: "★ Plain words"
+  },
+  {
+    title: "Parse — turn a messy PDF into clean text",
+    view: "pipeline", active: ["pipe-parse"],
+    text: "A PDF is a pile of positioned glyphs, not tidy text — columns, tables, headers all jumbled. <b>Parsing</b> extracts the real words and " +
+          "the layout (which is a heading, which is a table cell). Tools like Azure Document Intelligence do this.",
+    secondary: "Garbage in, garbage out: if parsing mangles a table here, <b>no clever search later can fix it</b>. This is the quiet step that decides your ceiling.",
+    secHead: "⚠ Why it matters"
+  },
+  {
+    title: "Chunk — cut text into bite-sized pieces",
+    view: "pipeline", active: ["pipe-chunk"],
+    text: "You can't search a whole 80-page document as one lump. <b>Chunking</b> splits it into pieces of roughly <b>300–800 tokens</b> " +
+          "(a token ≈ ¾ of a word). Each piece is small enough to be precise, big enough to make sense on its own.",
+    secondary: "Two craft details: <b>overlap</b> a little between chunks so a sentence split across the boundary isn't lost, and try not to slice a table or section in half.",
+    secHead: "★ Plain words"
+  },
+  {
+    title: "Enrich — bolt labels onto each chunk",
+    view: "pipeline", active: ["pipe-enrich"],
+    text: "Each chunk gets <b>metadata</b>: which document it came from, the section title, a date, a region, an ID. These are facts <em>about</em> the chunk, " +
+          "stored alongside it.",
+    secondary: "Payoff comes at query time: metadata lets you <b>filter before you search</b> — e.g. \"only Scotland, only 2024 policies\" — so search never even looks at irrelevant chunks.",
+    secHead: "★ Why it matters"
+  },
+  {
+    title: "Embed — turn meaning into numbers",
+    view: "pipeline", active: ["pipe-embed"],
+    text: "An <b>embedding</b> is the chunk's meaning expressed as a long list of numbers — a <b>vector</b> (often ~1,536 numbers). " +
+          "Texts with similar meaning get similar number-lists, so \"closeness in number-space\" = \"closeness in meaning\".",
+    secondary: "This is the trick behind meaning-based search: compare two vectors mathematically and you've compared two <b>meanings</b> — even if they share no words.",
+    secHead: "★ Plain words"
+  },
+  {
+    title: "Store — one row, three shapes of the same chunk",
+    view: "row", active: [],
+    text: "Each chunk becomes <b>one Postgres row</b> holding three columns: <b>text</b> (the words), <b>embedding</b> (the vector, via the " +
+          "<code>pgvector</code> extension), and <b>metadata</b> (the labels, as <code>JSONB</code>). Same chunk, three useful forms.",
+    secondary: "<b>pgvector</b> = a Postgres add-on that lets a column hold vectors and compare them. <b>JSONB</b> = Postgres's format for storing flexible labelled data (like <code>{region:\"Scotland\", year:2024}</code>) that you can still filter on quickly.",
+    secHead: "★ Two terms"
+  },
+  {
+    title: "Index ×2 — two doors into the same rows",
+    view: "dual", active: [],
+    text: "An <b>index</b> is a lookup structure that makes search fast (like a book's index instead of reading every page). " +
+          "You build <b>two</b>: one over <code>text</code> for keyword search, one over <code>embedding</code> for meaning search. That's \"dual indexing\".",
+    secondary: "Each door catches what the other misses — exact codes vs. paraphrases. Running both and merging the results is exactly the <b>hybrid search</b> from the accuracy page.",
+    secHead: "★ Connects to page 1"
+  },
+  {
+    title: "TF/IDF — how keyword search ranks words",
+    view: "tfidf", active: [],
+    text: "When keyword search finds matches, it must score them. The classic rule is <b>TF/IDF</b>. " +
+          "<b>TF</b> (term frequency) rewards words that appear often in <em>this</em> chunk; <b>IDF</b> (inverse document frequency) rewards words that are <em>rare overall</em>. " +
+          "Multiply them — so a rare, repeated word wins, and \"the\" scores nothing.",
+    secondary: "\"TF/IDF-<b>style</b>\" is the phrase to notice: Postgres's built-in ranking follows this idea but isn't the full modern formula. That's the very next step.",
+    secHead: "★ Plain words"
+  },
+  {
+    title: "tsvector vs real BM25 (ParadeDB)",
+    view: "bm25", active: [],
+    text: "Postgres's built-in keyword search uses a <b>tsvector</b> (its full-text index) scored by <code>ts_rank</code> — a TF/IDF-style, " +
+          "\"good enough\" rank. <b>BM25</b> is the smarter modern version. To get real BM25 inside Postgres you add <b>ParadeDB / pg_search</b>.",
+    secondary: "<b>tsvector</b> = Postgres's pre-processed, searchable form of text. <b>BM25</b> = TF/IDF plus two fixes (repeat-word saturation + length fairness). <b>ParadeDB</b> = an extension that bolts true BM25 onto Postgres.",
+    secHead: "★ Three terms"
+  },
+  {
+    title: "HNSW — the fast graph for meaning search",
+    view: "hnsw", active: [],
+    text: "Comparing your query to millions of vectors one-by-one is too slow. <b>HNSW</b> (Hierarchical Navigable Small World) wires the vectors " +
+          "into a web of \"who's near whom\", then <b>walks the web toward the query</b>, landing on the nearest match in a few hops.",
+    secondary: "The name decoded: a <b>small-world graph</b> is a web where any point reaches any other in few hops (like \"6 degrees of separation\"). HNSW is today's <b>default</b> vector index — fast, accurate, a bit memory-hungry.",
+    secHead: "★ Name decoded"
+  },
+  {
+    title: "IVFFlat — the lighter alternative",
+    view: "ivf", active: [],
+    text: "<b>IVFFlat</b> sorts vectors into a handful of <b>clusters</b> up front. At query time it picks the cluster the query falls into and " +
+          "<b>only searches that one</b>, skipping the rest. Cheaper to build and lighter on memory than HNSW.",
+    secondary: "The trade-off: a true match sitting just over a cluster border can be <b>missed</b> (lower recall). Pick <b>HNSW when you want the best results</b>, <b>IVFFlat when memory is tight</b>.",
+    secHead: "⚖ The trade"
+  },
+  {
+    title: "The mental model to keep",
+    view: "mental", active: [],
+    text: "Strip away the jargon and it's simple: a <b>chunk</b> is a retrievable knowledge unit, stored with three handles — " +
+          "<b>meaning</b> (embedding), <b>keywords</b> (text index), <b>context</b> (metadata). Those three are exactly what enable hybrid retrieval, filtering, and reranking.",
+    secondary: "That last box — <b>reranking</b> — is where this page hands off to the accuracy walkthrough. Storage builds the shelf; query time picks the best books off it.",
+    secHead: "★ Take this with you"
+  }
+];
+
+/* ════ stage rendering ════ */
+function renderStage(step){
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("show"));
+  const v = document.getElementById("view-" + step.view);
+  if (!v) return;
+  v.classList.add("show");
+
+  // reset all highlightable, then apply this step's
+  document.querySelectorAll(".hl").forEach(el => el.classList.remove("hot", "dim"));
+  const act = step.active || [];
+  if (act.length) {
+    v.querySelectorAll(".hl").forEach(el => {
+      if (act.includes(el.id)) el.classList.add("hot");
+      else el.classList.add("dim");
+    });
+  }
+  document.getElementById("sec-head").textContent = step.secHead || "★ Plain words";
+}
+
+/* ── stepper engine ── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 4600);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>

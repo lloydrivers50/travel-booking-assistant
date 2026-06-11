@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<!-- Throwaway walkthrough — RAG architectures through the accuracy lens. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Which RAG architecture wins when accuracy is everything?</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px; max-width: 1180px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 800px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 16px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button:hover { background: #2a2e4c; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 26px 28px; min-height: 340px;
+  }
+  .view { display: none; }
+  .view.show { display: block; animation: fade .3s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 14px; }
+  .node .n-sub { color: var(--ink-dim); font-size: 12px; margin-top: 4px; }
+  .node.dim { opacity: .4; }
+  .node.hot {
+    transform: translateY(-3px); border-color: var(--accent); opacity: 1;
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 820px){ .grid4 { grid-template-columns: 1fr 1fr; } }
+
+  /* ---- pipeline ---- */
+  .pipe { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .pipe-step { flex: 1; min-width: 150px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 11px; padding: 14px 14px; position: relative; }
+  .pipe-arrow { display: flex; align-items: center; color: var(--accent); font-size: 22px; padding: 0 8px; }
+  .pipe-step .p-t { font-weight: 700; font-size: 13.5px; }
+  .pipe-step .p-d { color: var(--ink-dim); font-size: 11.5px; margin-top: 5px; }
+  .tag-have { display:inline-block; margin-top:8px; font-size:10px; font-weight:700; letter-spacing:.05em;
+    text-transform:uppercase; color:var(--good); background:rgba(92,211,164,.14); padding:2px 7px; border-radius:999px; }
+
+  /* ---- table ---- */
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.cmp th, table.cmp td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+  table.cmp th { color: var(--ink-dim); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  table.cmp tr.row-hot td { background: rgba(139,155,255,.08); }
+  table.cmp td.q { font-weight: 700; }
+  .pill { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .pill.low { background: rgba(246,137,107,.16); color: var(--bad); }
+  .pill.mid { background: rgba(246,182,87,.16); color: var(--warn); }
+  .pill.high { background: rgba(92,211,164,.16); color: var(--good); }
+  .pill.top { background: linear-gradient(120deg, rgba(139,155,255,.25), rgba(92,211,164,.25)); color: #cfe6ff; }
+
+  /* ---- decision flow ---- */
+  .dec { display: flex; flex-direction: column; gap: 14px; }
+  .dec-q { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px; }
+  .dec-q .q { font-weight: 700; }
+  .dec-ans { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .branch { flex: 1; min-width: 200px; border-radius: 9px; padding: 9px 12px; font-size: 12.5px; border: 1px solid var(--line); }
+  .branch.yes { background: rgba(92,211,164,.08); border-color: rgba(92,211,164,.4); }
+  .branch.no  { background: rgba(246,137,107,.07); border-color: rgba(246,137,107,.35); }
+  .branch b { color: var(--ink); }
+
+  /* ---- stack ---- */
+  .stack { display: flex; flex-direction: column; gap: 9px; }
+  .layer { display: flex; align-items: center; gap: 14px; border: 1px solid var(--line);
+    border-radius: 11px; padding: 13px 16px; background: var(--panel-2); transition: all .25s; }
+  .layer .lnum { width: 26px; height: 26px; flex: none; border-radius: 8px; display: grid; place-items: center;
+    font-weight: 700; font-size: 13px; background: #0b0c14; border: 1px solid var(--line); color: var(--accent); }
+  .layer .l-t { font-weight: 700; font-size: 14px; }
+  .layer .l-d { color: var(--ink-dim); font-size: 12px; margin-top: 2px; }
+  .layer.you { border-color: rgba(92,211,164,.5); box-shadow: 0 0 0 1px rgba(92,211,164,.3); }
+  .layer.you .lnum { color: var(--good); }
+
+  /* ---- callout / verdict ---- */
+  .callout { border-left: 3px solid var(--good); background: rgba(92,211,164,.07);
+    border-radius: 8px; padding: 14px 16px; font-size: 13.5px; }
+  .verdict { display: flex; flex-direction: column; gap: 16px; }
+  .verdict .big { font-size: 17px; line-height: 1.5; }
+  .verdict .big b { color: var(--good); }
+  .stamp { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    color: var(--accent); border:1px solid var(--accent); border-radius:999px; padding:4px 12px; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body b { color: var(--ink); }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  @media (max-width: 820px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">RAG · accuracy-first architecture</div>
+  <h1>When accuracy is everything, which RAG wins?</h1>
+  <p class="sub">Spoiler: it isn't a single row in the table. For maximum faithfulness you <em>layer</em> techniques —
+  and your offline schema-extraction pipeline already wins you the hardest part. Step through, one idea at a time.</p>
+</header>
+
+<div class="controls">
+  <button id="prev">‹ Back</button>
+  <button id="play" class="primary">▶ Play</button>
+  <button id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage">
+
+  <!-- VIEW: the four patterns -->
+  <div class="view" id="view-patterns">
+    <div class="grid4">
+      <div class="node" id="node-naive">
+        <div class="n-title">Naive RAG</div>
+        <div class="n-sub">embed query → top-k vector search → stuff into prompt → generate</div>
+      </div>
+      <div class="node" id="node-hybrid">
+        <div class="n-title">Hybrid + Rerank</div>
+        <div class="n-sub">BM25 + vector → fuse → cross-encoder rerank → top-5 → generate</div>
+      </div>
+      <div class="node" id="node-agentic">
+        <div class="n-title">Agentic RAG</div>
+        <div class="n-sub">decompose → retrieve → grade → reformulate → self-check → cite</div>
+      </div>
+      <div class="node" id="node-graph">
+        <div class="n-title">Graph RAG</div>
+        <div class="n-sub">entities + relationships → traverse the graph → multi-hop answers</div>
+      </div>
+    </div>
+    <p style="color:var(--ink-dim); font-size:12.5px; margin-top:18px;">
+      Same job — fetch the right context, then answer. They differ entirely in <b style="color:var(--ink)">how hard they work to make sure the context is actually right</b>.
+    </p>
+  </div>
+
+  <!-- VIEW: your offline pipeline -->
+  <div class="view" id="view-offline">
+    <div class="pipe">
+      <div class="pipe-step">
+        <div class="p-t">Source docs</div>
+        <div class="p-d">NHS travel policies — messy PDFs, tables, clauses</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="p-t">Azure Document Intelligence</div>
+        <div class="p-d">OCR + layout + table/field extraction</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="p-t">Well-defined schema</div>
+        <div class="p-d">typed fields, not free-text blobs</div>
+        <span class="tag-have">you already do this</span>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="p-t">Structured store</div>
+        <div class="p-d">clean rows + metadata, ready to query</div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:18px;">
+      This all happens <b>offline</b>, before any user asks anything. That single fact quietly de-risks the
+      part of RAG that fails most often.
+    </div>
+  </div>
+
+  <!-- VIEW: comparison table -->
+  <div class="view" id="view-table">
+    <table class="cmp">
+      <thead>
+        <tr><th>Pattern</th><th>Cost / query</th><th>Latency</th><th>Quality</th><th>Accuracy verdict</th></tr>
+      </thead>
+      <tbody>
+        <tr id="tr-naive"><td class="q">Naive RAG</td><td>$0.001</td><td>200ms</td><td><span class="pill low">Low–Med</span></td><td>Cheapest, least faithful</td></tr>
+        <tr id="tr-hybrid"><td class="q">Hybrid + Rerank</td><td>$0.005</td><td>400ms</td><td><span class="pill high">High</span></td><td>Best accuracy-per-ms</td></tr>
+        <tr id="tr-agentic"><td class="q">Agentic RAG</td><td>$0.02–0.10</td><td>2–8s</td><td><span class="pill top">Very High</span></td><td>Highest faithfulness ceiling</td></tr>
+        <tr id="tr-graph"><td class="q">Graph RAG</td><td>$0.01–0.05</td><td>0.5–2s</td><td><span class="pill high">High*</span></td><td>*only on multi-hop relational</td></tr>
+      </tbody>
+    </table>
+    <p style="color:var(--ink-dim); font-size:12px; margin-top:14px;">
+      Treat the exact figures as order-of-magnitude vibes, not gospel — the shape is what matters: accuracy costs latency.
+    </p>
+  </div>
+
+  <!-- VIEW: decision flow -->
+  <div class="view" id="view-decision">
+    <div class="dec">
+      <div class="dec-q" id="dq1">
+        <div class="q">1 · Is your data already structured before query time?</div>
+        <div class="dec-ans">
+          <div class="branch yes"><b>Yes (you)</b> → retrieval is half-solved. Lean on metadata filters + hybrid search over typed fields.</div>
+          <div class="branch no"><b>No</b> → fix ingestion first. No reranker saves a bad chunking strategy.</div>
+        </div>
+      </div>
+      <div class="dec-q" id="dq2">
+        <div class="q">2 · Do answers need multi-hop relational reasoning?</div>
+        <div class="dec-ans">
+          <div class="branch yes"><b>Yes</b> → add <b>Graph RAG</b> for those query types. Relationships beat similarity here.</div>
+          <div class="branch no"><b>No</b> → skip the graph. It's complexity you don't need.</div>
+        </div>
+      </div>
+      <div class="dec-q" id="dq3">
+        <div class="q">3 · Is accuracy worth 5–10× the latency &amp; cost?</div>
+        <div class="dec-ans">
+          <div class="branch yes"><b>Yes (policy/compliance)</b> → wrap an <b>agentic verify-and-cite loop</b> around retrieval.</div>
+          <div class="branch no"><b>No (chatty UX)</b> → Hybrid + Rerank alone, single pass.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: the layered stack -->
+  <div class="view" id="view-stack">
+    <div class="stack">
+      <div class="layer you" id="ly1">
+        <div class="lnum">1</div>
+        <div><div class="l-t">Offline structured extraction <span style="color:var(--good)">— you have this</span></div>
+        <div class="l-d">Azure DI + schema. Clean, typed data means retrieval starts from truth, not a blob of PDF.</div></div>
+      </div>
+      <div class="layer" id="ly2">
+        <div class="lnum">2</div>
+        <div><div class="l-t">Hybrid retrieval + metadata filtering</div>
+        <div class="l-d">BM25 (exact terms) + vector (meaning), fused. Filter by schema fields <em>before</em> ranking.</div></div>
+      </div>
+      <div class="layer" id="ly3">
+        <div class="lnum">3</div>
+        <div><div class="l-t">Cross-encoder reranking</div>
+        <div class="l-d">Retrieve top-50 → rerank to top-5. The single highest-ROI accuracy lever.</div></div>
+      </div>
+      <div class="layer" id="ly4">
+        <div class="lnum">4</div>
+        <div><div class="l-t">Agentic verify-and-cite loop</div>
+        <div class="l-d">Grade the context, re-query if weak, self-check the answer against the question, attach citations.</div></div>
+      </div>
+      <div class="layer" id="ly5">
+        <div class="lnum">5</div>
+        <div><div class="l-t">Faithfulness evaluation in CI</div>
+        <div class="l-d">RAGAS faithfulness &gt; 0.9 as a gate. If you can't measure it, you can't claim it.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: verdict -->
+  <div class="view" id="view-verdict">
+    <div class="verdict">
+      <span class="stamp">The recommendation</span>
+      <div class="big">
+        For an accuracy-first system on <b>already-structured schema data</b>, make
+        <b>Hybrid + Rerank with metadata filtering</b> your backbone, and wrap an
+        <b>agentic verify-and-cite loop</b> around it. Reach for <b>Graph RAG</b> only when
+        queries are genuinely multi-hop relational.
+      </div>
+      <div class="callout">
+        Naive RAG is never the answer when accuracy is the priority. And "Agentic RAG" on its own
+        isn't a pattern you pick <em>instead</em> of the others — it's a control loop you wrap
+        <em>around</em> a strong retrieval stack.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ The sharp edge</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step through · ▶ Play to autoplay</p>
+
+<script>
+/* ════ steps ════ */
+const steps = [
+  {
+    title: "Accuracy isn't a row — it's a stack",
+    view: "patterns", active: [],
+    text: "The table gives you four patterns and asks you to pick one. That's the wrong question for an accuracy-first system. " +
+          "Each pattern is really a <b>different amount of effort spent verifying the retrieved context is correct</b> before the model speaks. " +
+          "Max accuracy comes from layering that effort, not choosing one layer.",
+    secondary: "Hold the thought: by the end you'll see your own pipeline already owns the most valuable layer — and the rest bolts onto it.",
+    secHead: "★ The sharp edge"
+  },
+  {
+    title: "Naive RAG: where accuracy goes to die",
+    tag: { kind: "bad", label: "weakest" },
+    view: "patterns", active: ["node-naive"],
+    text: "Embed the question, pull the top-k nearest chunks by cosine similarity, stuff them in the prompt, generate. " +
+          "It fails because <b>retrieval</b> fails — semantic similarity grabs chunks that <em>sound</em> related but don't answer the question, " +
+          "and fixed-size chunking slices logical units in half. The model then faithfully summarises the wrong context.",
+    secondary: "The article's “73% of failures are retrieval” stat is unsourced marketing — but the <b>direction</b> is right: in production, generation is rarely the weak link. Retrieval is.",
+    secHead: "⚠ Gotcha"
+  },
+  {
+    title: "Your unfair advantage: offline schema extraction",
+    tag: { kind: "good", label: "you already win here" },
+    view: "offline", active: [],
+    text: "Here's why your setup changes the answer. You don't retrieve over raw chunked PDFs. You run <b>Azure Document Intelligence offline</b>, " +
+          "extract into a <b>well-defined schema</b>, and store clean, typed rows. The expensive, failure-prone work — turning a mess into trustworthy structure — " +
+          "is done <em>before</em> any query arrives.",
+    secondary: "This moves the retrieval bottleneck upstream. Your query-time retrieval starts from <b>structured truth</b>, so it's dramatically more reliable than naive chunked-PDF RAG. You bought accuracy in the ingestion phase.",
+    secHead: "★ Why it matters"
+  },
+  {
+    title: "Hybrid + Rerank: the accuracy backbone",
+    tag: { kind: "good", label: "best ROI" },
+    view: "patterns", active: ["node-hybrid"],
+    text: "Run <b>BM25</b> (exact keyword match — great for policy codes, defined terms) <em>and</em> <b>vector search</b> (meaning), then fuse with " +
+          "<b>Reciprocal Rank Fusion</b> (score = Σ 1/(k+rank), k≈60). Pull a wide net — top-50 — then a <b>cross-encoder reranker</b> " +
+          "(Cohere Rerank v3.5, ColBERT) reads each candidate <em>against the query</em> and cuts to the best 5.",
+    secondary: "Reranking is the single <b>highest-ROI accuracy lever</b> — typically 15–30% better retrieval quality for one extra call. On your schema data, add <b>metadata filtering</b> first (region, policy type, date) so the reranker only sees legally-relevant candidates.",
+    secHead: "★ Best practice"
+  },
+  {
+    title: "Agentic RAG: faithfulness at a price",
+    tag: { kind: "good", label: "highest ceiling" },
+    view: "patterns", active: ["node-agentic"],
+    text: "Not a retriever — a <b>control loop</b> (LangGraph et al.). Decompose the question into sub-queries, retrieve, " +
+          "<b>grade whether the context actually answers it</b>, reformulate and retry if not, then <b>self-check the draft answer against the question</b> " +
+          "and attach citations. This is what pushes faithfulness to the top of the table.",
+    secondary: "The cost is real: 2–8s and 10–50× the spend per query. Worth it when a wrong answer has consequences (compliance, policy, healthcare) — i.e. exactly your domain. Not worth it for chatty, low-stakes UX.",
+    secHead: "⚖ The trade"
+  },
+  {
+    title: "Graph RAG: only for multi-hop",
+    view: "patterns", active: ["node-graph"],
+    text: "Build a graph of <b>entities and relationships</b>, then traverse it. It wins precisely when correctness depends on " +
+          "<b>connecting facts across documents</b> — “which policy supersedes the 2023 mileage rate for a band-6 nurse in Scotland?” " +
+          "Similarity search can't hop those links; a graph can.",
+    secondary: "Don't add it reflexively. If your questions are single-fact lookups against typed fields (“what's the overnight allowance cap?”), a graph is complexity with no accuracy payoff. Add it <b>only</b> for genuinely relational queries.",
+    secHead: "⚠ When NOT to"
+  },
+  {
+    title: "The numbers, side by side",
+    view: "table", active: [],
+    text: "Read the table through the accuracy lens, not the cost lens. The trend is monotonic: <b>more verification effort → higher faithfulness → more latency</b>. " +
+          "There's no free lunch where you get top accuracy at naive cost. So the real game is spending that latency budget <em>only where it buys correctness</em>.",
+    secondary: "The exact dollars and milliseconds are illustrative. What's robust is the ordering and the gaps — Agentic is an order of magnitude slower than Hybrid, so you reserve it for the answers that must be right.",
+    secHead: "★ How to read it"
+  },
+  {
+    title: "A decision flow you can actually use",
+    view: "decision", active: [],
+    text: "Three questions decide your architecture. Notice the first one — <b>“is the data already structured?”</b> — you answer <b>yes</b>, " +
+          "which is the strongest possible starting position. The other two scope how much machinery you bolt on top.",
+    secondary: "Your likely answers: <b>Q1 yes</b> (Azure DI + schema), <b>Q2 sometimes</b> (some policy questions are relational), <b>Q3 yes</b> (accuracy is the whole point). That maps cleanly onto the stack on the next step.",
+    secHead: "★ Your answers"
+  },
+  {
+    title: "The accuracy-maximising stack",
+    view: "stack", active: [],
+    text: "This is the real answer to “which one is best”: you <b>layer</b> them. Layer 1 — the foundation everything rests on — is the one you already own. " +
+          "Each layer above shaves off a different class of error: filtering removes irrelevance, reranking removes near-misses, the agentic loop removes confident-but-unsupported claims, and eval keeps you honest.",
+    secondary: "Make <b>RAGAS faithfulness &gt; 0.9</b> a CI gate (also: answer-relevancy &gt; 0.85, context-precision &gt; 0.8). An accuracy claim you don't measure in the pipeline is just a vibe.",
+    secHead: "★ Don't skip layer 5"
+  },
+  {
+    title: "The verdict for your system",
+    tag: { kind: "good", label: "recommendation" },
+    view: "verdict", active: [],
+    text: "Because your data is structured offline, you skip the hardest, flakiest part of RAG. " +
+          "Build <b>Hybrid + Rerank with metadata filtering</b> as the backbone, <b>wrap an agentic verify-and-cite loop</b> for the high-stakes answers, " +
+          "and add <b>Graph RAG</b> only for the genuinely multi-hop questions. Gate the whole thing on faithfulness eval.",
+    secondary: "One line for the new job: <b>“Accuracy isn't a pattern you pick — it's a stack you compose, and good ingestion is the load-bearing layer.”</b> You already build that layer.",
+    secHead: "★ Take this with you"
+  }
+];
+
+/* ════ stage rendering ════ */
+const rowMap = { 1: "tr-naive", 3: "tr-hybrid", 4: "tr-agentic", 5: "tr-graph" };
+function renderStage(step){
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("show"));
+  const v = document.getElementById("view-" + step.view);
+  if (v) v.classList.add("show");
+
+  // in the patterns view, dim the non-active nodes
+  if (step.view === "patterns") {
+    ["node-naive","node-hybrid","node-agentic","node-graph"].forEach(id => {
+      const el = document.getElementById(id);
+      const on = (step.active || []).includes(id);
+      el.classList.toggle("dim", (step.active && step.active.length > 0) && !on);
+    });
+  }
+  // secondary card heading per step
+  document.getElementById("sec-head").textContent = step.secHead || "★ The sharp edge";
+}
+
+/* ── stepper engine ── */
+let i = 0, playing = false, timer = null;
+const dotsWrap = document.getElementById("dots");
+document.getElementById("total").textContent = steps.length - 1;
+steps.forEach((_, idx) => {
+  const d = document.createElement("div");
+  d.className = "dot";
+  d.onclick = () => { stop(); go(idx); };
+  dotsWrap.appendChild(d);
+});
+
+function render(){
+  const s = steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? (s.tag.kind === "good" ? "good" : "bad") : "";
+  document.querySelectorAll(".node").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && branch === "bad");
+  });
+
+  // highlight a table row if this step maps to one
+  document.querySelectorAll("table.cmp tr").forEach(r => r.classList.remove("row-hot"));
+  if (s.view === "table") { /* whole table shown, no single row */ }
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  const sec = document.getElementById("step-secondary");
+  sec.className = s.secondary ? "secondary-body" : "secondary-none";
+  sec.innerHTML = s.secondary || "Nothing extra on this step — keep going.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === steps.length - 1;
+}
+function go(n){ i = Math.max(0, Math.min(steps.length - 1, n)); render(); }
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  if (i === steps.length - 1) go(0);
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    if (i === steps.length - 1) { stop(); return; }
+    go(i + 1);
+  }, 4200);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+render();
+</script>
+</body>
+</html>
