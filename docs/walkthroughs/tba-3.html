@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TBA-3 — Parser port + stub (bytes → elements, the DI seam)</title>
+<style>
+  :root {
+    --bg: #0d0e16; --panel: #161827; --panel-2: #1d2035;
+    --ink: #e7e8f0; --ink-dim: #9a9cb8; --line: #2c2f48;
+    --accent: #8b9bff; --good: #5cd3a4; --warn: #f6b657; --bad: #f6896b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 28px 24px 64px; max-width: 1240px; margin: 0 auto;
+  }
+  .mono, code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code {
+    background: #0b0c14; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px; font-size: 12.5px; color: #cdd2ee;
+  }
+
+  header { margin-bottom: 18px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--warn); font-weight: 600; margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 27px; line-height: 1.2; font-weight: 700;
+    background: linear-gradient(100deg, var(--accent), #c79bff 55%, var(--good));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-dim); margin-top: 8px; max-width: 820px; }
+
+  /* ---- section tabs ---- */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 18px 0 14px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .tab {
+    font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--ink-dim);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 13px; transition: all .15s;
+  }
+  .tab:hover { color: var(--ink); border-color: #3a3f63; }
+  .tab.active { color: #fff; background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .tab .num { opacity: .6; margin-right: 5px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 16px; }
+  button.ctl {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 16px; transition: background .15s, transform .05s;
+  }
+  button.ctl:hover { background: #2a2e4c; }
+  button.ctl:active { transform: translateY(1px); }
+  button.ctl:disabled { opacity: .38; cursor: default; }
+  button.ctl.primary { background: linear-gradient(120deg, #5a78d6, #7d5fd0); border-color: transparent; }
+  .counter { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s, transform .2s; }
+  .dot.done { background: #44496f; }
+  .dot.active { background: var(--accent); transform: scale(1.35); }
+
+  /* ---- stage ---- */
+  .stage {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 24px 26px; min-height: 320px;
+  }
+  .node {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 13px 15px; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
+  }
+  .node .n-title { font-weight: 700; font-size: 13.5px; }
+  .node .n-desc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+  .node.hot {
+    transform: translateY(-2px); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 26px -10px var(--accent);
+  }
+  .node.hot.good { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 8px 26px -10px var(--good); }
+  .node.hot.bad  { border-color: var(--bad);  box-shadow: 0 0 0 1px var(--bad),  0 8px 26px -10px var(--bad); }
+  .node.dim { opacity: .32; }
+
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch; }
+  .col { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 12px; }
+  .arrow { align-self: center; color: var(--ink-dim); font-size: 22px; padding: 0 2px; }
+  .label-mini { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 6px; font-weight: 700; }
+
+  /* ---- code panel with line highlighting ---- */
+  .code-panel { background: #0b0c14; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 6px 14px 0; overflow-x: auto; }
+  .code-line {
+    display: flex; font-size: 13px; line-height: 1.8; white-space: pre;
+    border-left: 3px solid transparent; transition: background .2s, border-color .2s, opacity .2s; opacity: .5;
+  }
+  .code-line .ln { width: 36px; text-align: right; padding-right: 12px; color: #4a4f72; user-select: none; flex: none; }
+  .code-line .code { padding-right: 14px; }
+  .code-line.hot { opacity: 1; background: rgba(139,155,255,.10); border-left-color: var(--accent); }
+  .code-line.hot.bad { background: rgba(246,137,107,.10); border-left-color: var(--bad); }
+  .c-kw { color: #c79bff; } .c-str { color: #7fd0a3; }
+  .c-com { color: #5a5f85; font-style: italic; } .c-fn { color: #6ea8ff; }
+  .c-num { color: #f6b657; } .c-type { color: #6ed0d0; }
+
+  /* ---- info cards ---- */
+  .info { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 22px; }
+  .card h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; }
+  .card.primary h3 { color: var(--accent); }
+  .card.secondary h3 { color: var(--good); }
+  .step-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+  .step-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+  }
+  .step-tag.good { background: rgba(92,211,164,.15); color: var(--good); }
+  .step-tag.bad  { background: rgba(246,137,107,.15); color: var(--bad); }
+  .step-tag.neutral { background: rgba(139,155,255,.15); color: var(--accent); }
+  .step-text { color: var(--ink); }
+  .step-text b { color: #fff; }
+  .step-text .term { color: var(--warn); font-weight: 700; }
+  .secondary-body { color: var(--ink-dim); font-size: 13.5px; }
+  .secondary-body code { font-size: 12px; }
+  .secondary-none { color: #4a4f72; font-style: italic; font-size: 13px; }
+
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top: 16px; text-align: center; }
+  .pill { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--ink-dim); }
+  .pill.t-heading { color:#8b9bff; border-color:#3a3f7a; }
+  .pill.t-paragraph { color:#5cd3a4; border-color:#2f6a52; }
+  .pill.t-table { color:#f6b657; border-color:#6a5a2f; }
+
+  /* registry table for DI section */
+  .registry { width:100%; border-collapse: collapse; font-size:12.5px; }
+  .registry th, .registry td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }
+  .registry th { color:var(--ink-dim); font-size:11px; letter-spacing:.05em; text-transform:uppercase; }
+  .registry tr.match td { background: rgba(92,211,164,.10); }
+  .registry tr.miss td { background: rgba(246,137,107,.10); }
+  .registry code { font-size:11.5px; }
+
+  /* narrowing object viewer */
+  .obj { font-size:12.5px; line-height:1.9; }
+  .obj .field { transition: opacity .2s, color .2s; }
+  .obj .field.live { color: var(--good); }
+  .obj .field.dead { opacity:.28; text-decoration: line-through; }
+  .obj .field .fk { color:#6ea8ff; }
+
+  .summary-out {
+    background:#0b0c14; border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+    font-size:13px; color:#cdd2ee; min-height:48px; transition: all .2s;
+  }
+  .summary-out .green { color: var(--good); }
+  @media (max-width: 860px) { .info { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Travel Booking Assistant · TBA-3</div>
+  <h1>Parser port + stub: turning opaque bytes into a typed element list</h1>
+  <p class="sub">After TBA-1/2 the ingestion service holds raw PDF <i>bytes</i> and nothing that understands them.
+  This ticket builds the <b>seam</b> — a <code>Parser</code> interface — and a <b>stub</b> behind it, then wires it through Nest's
+  dependency injection. Seven sections; each has its own stepper. Drive it yourself.</p>
+</header>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="controls">
+  <button class="ctl" id="prev">‹ Back</button>
+  <button class="ctl primary" id="play">▶ Play</button>
+  <button class="ctl" id="next">Next ›</button>
+  <span class="counter"><span id="cur">0</span> / <span id="total">0</span></span>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<div class="info">
+  <div class="card primary">
+    <h3>What's happening</h3>
+    <div class="step-title" id="step-title"></div>
+    <div class="step-text" id="step-text"></div>
+  </div>
+  <div class="card secondary">
+    <h3 id="sec-head">★ In their code</h3>
+    <div id="step-secondary"></div>
+  </div>
+</div>
+
+<p class="hint">← / → arrow keys step · number tabs jump between the 7 concepts</p>
+
+<script>
+/* ── syntax highlighter ──────────────────────────────────────────────────── */
+const KW = new Set(["import","from","export","function","async","const","let","var","type",
+  "return","await","new","if","else","for","while","class","throw","implements","interface","extends","private","readonly","public"]);
+const FN = new Set(["Promise","console","Map","Set","Array","Object","JSON","Buffer","Symbol","Logger","Inject","Injectable","Module","reduce"]);
+const TYPES = new Set(["Element","Parser","StubParser","IngestionService","DocumentSource","LocalFileDocumentSource","ConfigService","OnModuleInit"]);
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="c-com">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="c-str">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="c-num">'+m[3]+'</span>';
+    else if(m[4]) out+= KW.has(m[4])?'<span class="c-kw">'+m[4]+'</span>'
+                     : TYPES.has(m[4])?'<span class="c-type">'+m[4]+'</span>'
+                     : FN.has(m[4])?'<span class="c-fn">'+m[4]+'</span>': esc(m[4]);
+    else out+=esc(m[5]);
+  }
+  return out;
+}
+function codeBlock(codeText){
+  let html='<div class="code-panel">';
+  codeText.split("\n").forEach((line,idx)=>{
+    html+='<div class="code-line" id="L'+(idx+1)+'"><span class="ln">'+(idx+1)+'</span><span class="code">'+(highlight(line)||" ")+'</span></div>';
+  });
+  return html+'</div>';
+}
+
+/* ════════════════════ SECTIONS ═════════════════════════════════════════════
+   Each section = its own stage HTML + its own steps array. */
+
+/* shared code snippets (verbatim from the user's files) */
+const SRC = {
+  parser:
+`export type Element =
+  | { type: 'heading';   page: number; text: string }
+  | { type: 'paragraph'; page: number; text: string }
+  | { type: 'table';     page: number; cells: string[][]; confidence: number };
+
+export interface Parser {
+  parse(bytes: Buffer): Promise<Element[]>;
+}
+
+export const PARSER = Symbol('PARSER');`,
+  stub:
+`import { Parser, Element } from './parser';
+
+const mock: Element[] = [
+  { type: 'heading',   page: 17, text: 'Appendix 3  Mileage Rates...' },
+  { type: 'paragraph', page: 17, text: 'At the time of publication...' },
+  { type: 'table',     page: 17,
+    cells: [
+      ['Type of vehicle', 'up to 3,500 miles', 'over 3,500 miles'],
+      ['Car (all fuel)',  '59 pence per mile', '24 pence per mile'],
+      ['Motor cycle',     '',                  '30 pence per mile'],
+    ],
+    confidence: 1 },
+  { type: 'paragraph', page: 17, text: 'To check rates apply...' },
+];
+
+export class StubParser implements Parser {
+  async parse(_bytes: Buffer): Promise<Element[]> {
+    return mock;
+  }
+}`,
+  service:
+`constructor(
+  @Inject(DOCUMENT_SOURCE)
+  private readonly source: DocumentSource,
+  @Inject(PARSER)
+  private readonly parser: Parser,
+) {}
+
+async onModuleInit() {
+  const bytes = await this.source.getBytes();
+  const elements = await this.parser.parse(bytes);
+  const elementCounts = elements.reduce((counts, element) => {
+    counts[element.type] = (counts[element.type] || 0) + 1;
+    return counts;
+  }, {});
+  this.logger.log(
+    \`Parsed \${elements.length} elements:\`,
+    JSON.stringify(elementCounts, null, 2),
+  );
+}`,
+  module:
+`@Module({
+  providers: [
+    IngestionService,
+    { provide: DOCUMENT_SOURCE, useClass: LocalFileDocumentSource },
+    { provide: PARSER,          useClass: StubParser },
+  ],
+})
+export class IngestionModule {}`,
+  broken:
+`// THE BUG THAT HAPPENED — two @Inject on ONE param:
+constructor(
+  @Inject(DOCUMENT_SOURCE)
+  @Inject(PARSER)
+  private readonly source: DocumentSource,   // both decorators hit THIS param
+  private readonly parser: Parser,           // <- no @Inject at all
+) {}`,
+  docsource:
+`// TBA-2 — the IDENTICAL move, one ticket earlier:
+export interface DocumentSource {
+  getBytes(): Promise<Buffer>;
+}
+export const DOCUMENT_SOURCE = Symbol('DOCUMENT_SOURCE');
+
+// module:  { provide: DOCUMENT_SOURCE, useClass: LocalFileDocumentSource }
+// service: @Inject(DOCUMENT_SOURCE) private readonly source: DocumentSource`,
+  reduce:
+`const elementCounts = elements.reduce((counts, element) => {
+  counts[element.type] = (counts[element.type] || 0) + 1;
+  return counts;
+}, {});   // start: {}  →  { heading:1, paragraph:2, table:1 }`,
+};
+
+/* ---------- SECTION 1: the problem (opaque bytes) ---------- */
+const S1 = {
+  name: "The problem",
+  stage:
+    `<div class="label-mini">What ingestion is holding after TBA-1 / TBA-2</div>
+     <div class="row">
+       <div class="col">
+         <div class="node" id="s1-bytes"><div class="n-title">Raw PDF bytes &nbsp;<code>Buffer</code></div>
+           <div class="n-desc mono" style="word-break:break-all;">25 50 44 46 2d 31 2e 37 0a 25 e2 e3 ... (257757 bytes)</div></div>
+       </div>
+       <div class="arrow">→</div>
+       <div class="col">
+         <div class="node dim" id="s1-chunk"><div class="n-title">chunk</div><div class="n-desc">needs structure</div></div>
+         <div class="node dim" id="s1-embed"><div class="n-title">embed</div><div class="n-desc">needs text</div></div>
+         <div class="node dim" id="s1-extract"><div class="n-title">extract rule</div><div class="n-desc">needs tables</div></div>
+       </div>
+     </div>
+     <div class="node dim" id="s1-wall" style="margin-top:14px;border-style:dashed;">
+       <div class="n-desc">Between bytes and every downstream step sits a wall: nobody downstream can read a <code>Buffer</code>.</div>
+     </div>`,
+  steps: [
+    { title:"Ingestion has bytes — and nothing else", active:["s1-bytes"], tag:{kind:"neutral",label:"start state"},
+      text:`TBA-1/2 ended here: <code>source.getBytes()</code> returns a <span class="term">Buffer</span> — a raw array of bytes, the literal file on disk. That's <b>257,757 bytes of PDF</b>. The service can hand it around, hash it, save it. It cannot <b>understand</b> it.`,
+      sec:`A <span class="term">Buffer</span> is Node's type for raw binary data. PDF bytes are a compressed container format — text, fonts, and layout are interleaved and encoded. There is no <code>.text</code> to read off it.` },
+    { title:"Bytes are opaque", active:["s1-bytes","s1-wall"], tag:{kind:"bad",label:"opaque"},
+      text:`"Opaque" = you can hold it but can't see inside. A <code>Buffer</code> exposes byte 0, byte 1… not "the heading on page 17." The structure a human sees on the page is <b>not</b> addressable in the bytes.`,
+      sec:`This is why "just read the PDF text" is a trap: even text-extraction libraries lose tables and reading order. Real structure recovery is the whole job — see <code>data-pipeline.md §6</code>.` },
+    { title:"Every downstream step is blocked", active:["s1-chunk","s1-embed","s1-extract","s1-wall"], tag:{kind:"bad",label:"blocked"},
+      text:`The pipeline wants to <b>chunk</b> (split into passages), <b>embed</b> (turn passages into vectors for search), and <b>extract</b> rules from tables. Every one of those needs <i>structured text</i>. None can touch a <code>Buffer</code>. The wall must come down first.`,
+      sec:`The thing that breaks the wall is a <b>parser</b>: bytes in, structured elements out. That parser — and the seam it plugs into — is this entire ticket.` },
+  ],
+};
+
+/* ---------- SECTION 2: parse once, branch twice ---------- */
+const S2 = {
+  name: "Parse once",
+  stage:
+    `<div class="row" style="align-items:center;">
+       <div class="col" style="max-width:200px;">
+         <div class="node" id="s2-bytes"><div class="n-title">PDF bytes</div><div class="n-desc">opaque Buffer</div></div>
+       </div>
+       <div class="arrow">→</div>
+       <div class="col" style="max-width:230px;">
+         <div class="node" id="s2-parse"><div class="n-title">PARSE ONCE</div><div class="n-desc">the single pass</div></div>
+         <div class="node" id="s2-elements"><div class="n-title">Element[]</div><div class="n-desc">neutral, layout-aware list — the chokepoint</div></div>
+       </div>
+       <div class="arrow">→</div>
+       <div class="col" style="max-width:240px;">
+         <div class="node" id="s2-a"><div class="n-title">Pipeline A — Explain (RAG)</div><div class="n-desc">chunk → embed → pgvector</div></div>
+         <div class="node" id="s2-b"><div class="n-title">Pipeline B — Enforce</div><div class="n-desc">extract typed rules → staging</div></div>
+       </div>
+     </div>
+     <div class="node dim" id="s2-rule" style="margin-top:14px;border-style:dashed;">
+       <div class="n-desc">Rule: nothing downstream ever sees raw PDF again. Both pipelines read the <b>same</b> <code>Element[]</code>.</div>
+     </div>`,
+  steps: [
+    { title:"One parse pass — not two", active:["s2-bytes","s2-parse"], tag:{kind:"neutral",label:"§3"},
+      text:`The pipeline forks into two halves: <b>Explain</b> (search/answer) and <b>Enforce</b> (extract rules code enforces). Tempting to parse the PDF once for each. <b>Don't.</b> Two parses = two chances to disagree about what the document said.`,
+      sec:`From <code>data-pipeline.md §3</code>: "Don't parse twice for the two pipelines — that's two chances to disagree about what the document said."` },
+    { title:"The element list is the chokepoint", active:["s2-parse","s2-elements","s2-rule"], tag:{kind:"good",label:"single source"},
+      text:`The parse produces one <span class="term">neutral, layout-aware element list</span> — <code>Element[]</code>. "Neutral" = not PDF-specific, not Azure-specific; just headings/paragraphs/tables tagged with a page. It is the <b>single chokepoint</b> the entire downstream reads from.`,
+      sec:`"Layout-aware" = it preserves document structure (a table stays a table, with rows). A flat text dump would have thrown that away — and tables are where the enforceable rates live.` },
+    { title:"Branch twice off the one list", active:["s2-elements","s2-a","s2-b","s2-rule"], tag:{kind:"good",label:"fan-out"},
+      text:`Both pipelines consume the <b>same</b> <code>Element[]</code>. Explain chunks+embeds it; Enforce extracts typed rules from it. Because they share one parse, they can never disagree at the source. <b>This ticket produces that list. Later tickets consume it.</b>`,
+      sec:`Out of scope here (resist): the fan-out itself — chunk, embed, extract. TBA-3 stops at "elements logged." Building the consumers now is premature.` },
+  ],
+};
+
+/* ---------- SECTION 3: discriminated union + narrowing ---------- */
+const S3 = {
+  name: "Element union",
+  stage:
+    `<div class="row">
+       <div class="col" style="flex:1.1;">${codeBlock(SRC.parser)}</div>
+       <div class="col" style="flex:.9;">
+         <div class="label-mini">An element you're holding</div>
+         <div class="node" id="s3-obj">
+           <div class="obj" id="s3-obj-body"></div>
+         </div>
+         <div class="node" id="s3-guard" style="margin-top:4px;">
+           <div class="n-desc mono" id="s3-guard-txt">// before any check: type is the whole union</div>
+         </div>
+       </div>
+     </div>`,
+  steps: [
+    { title:"A discriminated union = one of several shapes", active:["L1","L2","L3","L4"], tag:{kind:"neutral",label:"new TS idea"},
+      text:`<code>Element</code> is a <span class="term">discriminated union</span>: a type that is <b>exactly one of</b> several record shapes, joined by <code>|</code>. Here: a heading, a paragraph, or a table. A value of type <code>Element</code> is one of those three — never a mix.`,
+      sec:`"Union" = the <code>|</code> "or". "Discriminated" = there's a shared tag field that tells the shapes apart — next step.`,
+      obj:"union", guard:"// el: Element  — could be any of the 3" },
+    { title:"The discriminant is the shared `type` field", active:["L2","L3","L4"], tag:{kind:"neutral",label:"discriminant"},
+      text:`Every shape has a <code>type</code> field with a <b>literal</b> value: <code>'heading'</code>, <code>'paragraph'</code>, or <code>'table'</code>. That shared, value-distinct field is the <span class="term">discriminant</span> — the tag TypeScript reads to know which shape you actually hold.`,
+      sec:`Note the fields differ per shape: heading & paragraph carry <code>text</code>; table carries <code>cells</code> and <code>confidence</code>. Same union, different fields per <code>type</code>.`,
+      obj:"union", guard:"// el.type narrows it — watch →" },
+    { title:"Off the union, fields are NOT accessible yet", active:["L4"], tag:{kind:"bad",label:"no access"},
+      text:`Hold an <code>Element</code> with no check done, and TypeScript blocks <code>el.text</code> <i>and</i> <code>el.cells</code> — because a table has no <code>text</code> and a heading has no <code>cells</code>. Only fields present on <b>all three</b> shapes (<code>type</code>, <code>page</code>) are reachable.`,
+      sec:`This is the safety: TS won't let you read a field that might not exist on the shape you're holding. You must prove which shape first.`,
+      obj:"union", guard:"// el.text → ERROR (table has none)" },
+    { title:"Checking `el.type` NARROWS the type", active:["L4"], tag:{kind:"good",label:"narrowed → table"},
+      text:`Write <code>if (el.type === 'table')</code> and inside that branch TypeScript <span class="term">narrows</span> <code>el</code> from the whole union down to just the table shape. Now <code>el.cells</code> and <code>el.confidence</code> are accessible — and <code>el.text</code> is correctly gone.`,
+      sec:`"Narrowing" = TS shrinking a value's type using a runtime check. The discriminant is what makes it work — that's the entire reason the union has a <code>type</code> tag.`,
+      obj:"table", guard:"if (el.type === 'table') { el.cells ✓ }" },
+  ],
+};
+
+/* ---------- SECTION 4: the seam + dependency inversion ---------- */
+const S4 = {
+  name: "The seam",
+  stage:
+    `<div class="label-mini">Three files, one seam</div>
+     <div class="row">
+       <div class="col">
+         <div class="node" id="s4-iface"><div class="n-title">parser.ts — the contract</div>
+           <div class="n-desc mono">interface Parser { parse(bytes): Promise&lt;Element[]&gt; }<br>const PARSER = Symbol('PARSER')</div></div>
+         <div class="node" id="s4-impl"><div class="n-title">stub.parser.ts — an implementation</div>
+           <div class="n-desc mono">class StubParser implements Parser { ... }</div></div>
+       </div>
+       <div class="col">
+         <div class="node" id="s4-module"><div class="n-title">ingestion.module.ts — the binding</div>
+           <div class="n-desc mono">{ provide: PARSER, useClass: StubParser }</div></div>
+         <div class="node" id="s4-service"><div class="n-title">ingestion.service.ts — the consumer</div>
+           <div class="n-desc mono">@Inject(PARSER) private parser: Parser</div></div>
+       </div>
+     </div>
+     <div class="node dim" id="s4-payoff" style="margin-top:14px;border-style:dashed;">
+       <div class="n-desc">Payoff: the service is typed as <code>Parser</code>, bound to <code>PARSER</code>. It never names <code>StubParser</code>. TBA-4 swaps in <code>AzureParser</code> — service unchanged.</div>
+     </div>`,
+  steps: [
+    { title:"An interface has no runtime identity", active:["s4-iface"], tag:{kind:"neutral",label:"the problem"},
+      text:`<code>Parser</code> is a TypeScript <span class="term">interface</span> — a compile-time shape. It's <b>erased</b> before the code runs; at runtime there is no <code>Parser</code> object to ask for. So you can't tell Nest "inject the Parser" — there's nothing there to point at.`,
+      sec:`This is the core friction of DI in TS: interfaces vanish, but injection happens at runtime. You need a runtime handle that <i>stands for</i> the interface.` },
+    { title:"Bind the implementation to an injection token", active:["s4-iface"], tag:{kind:"neutral",label:"token"},
+      text:`So you create a <span class="term">injection token</span> — a unique runtime value used as a lookup key for a dependency. Here: <code>export const PARSER = Symbol('PARSER')</code>. A <code>Symbol</code> is guaranteed-unique, so it can't collide with anything else.`,
+      sec:`Exactly the pattern from TBA-2: <code>DOCUMENT_SOURCE = Symbol('DOCUMENT_SOURCE')</code>. Token names are <code>SCREAMING_CASE</code> by convention so they read as keys, not classes.` },
+    { title:"Register a provider: token → class", active:["s4-impl","s4-module"], tag:{kind:"neutral",label:"provider"},
+      text:`In the module you register a <span class="term">provider</span> — an entry telling Nest how to satisfy a token: <code>{ provide: PARSER, useClass: StubParser }</code>. Reads as "when something asks for <code>PARSER</code>, build a <code>StubParser</code> and hand it over."`,
+      sec:`<code>useClass</code> = instantiate this class. (Other forms: <code>useValue</code> for a ready object, <code>useFactory</code> for a function.) The module is the one place that knows the concrete class.` },
+    { title:"Inject the token, typed as the interface", active:["s4-service"], tag:{kind:"good",label:"the consumer"},
+      text:`The service asks for the token but types the field as the interface: <code>@Inject(PARSER) private readonly parser: Parser</code>. It gets a working parser, typed as <code>Parser</code> — and <b>never learns it's a StubParser</b>.`,
+      sec:`<code>@Inject(TOKEN)</code> overrides Nest's default (inject by class type). You need it here precisely because the type — an interface — can't be the key.` },
+    { title:"Dependency inversion — and you did it twice", active:["s4-payoff"], tag:{kind:"good",label:"the point"},
+      text:`<span class="term">Dependency inversion</span> = the consumer depends on the abstraction (<code>Parser</code>), not the concrete class — and the concrete class is chosen elsewhere (the module). TBA-4's <code>AzureParser implements Parser</code> binds to the same <code>PARSER</code> token: <b>zero service changes</b>.`,
+      sec:`The TBA-2 <code>DocumentSource</code> seam is byte-identical in shape — interface + Symbol + <code>useClass</code> + <code>@Inject</code>. Doing it twice is the ticket's intent: the pattern should feel routine.` },
+  ],
+};
+
+/* ---------- SECTION 5: Nest DI resolution flow (the heart) ---------- */
+const S5 = {
+  name: "DI resolution",
+  stage:
+    `<div class="row">
+       <div class="col" style="flex:1.05;">
+         <div class="label-mini" id="s5-mode">Nest resolving IngestionService at startup</div>
+         <div class="node" id="s5-ctor"><div class="n-title">constructor param</div>
+           <div class="n-desc mono" id="s5-ctor-txt">@Inject(PARSER) parser: Parser</div></div>
+         <div class="arrow" style="align-self:flex-start;padding-left:18px;">↓</div>
+         <div class="node" id="s5-lookup"><div class="n-title">look up the token</div>
+           <div class="n-desc mono" id="s5-lookup-txt">key = PARSER</div></div>
+         <div class="arrow" style="align-self:flex-start;padding-left:18px;">↓</div>
+         <div class="node" id="s5-inst"><div class="n-title">instantiate &amp; inject</div>
+           <div class="n-desc mono" id="s5-inst-txt">—</div></div>
+       </div>
+       <div class="col" style="flex:.95;">
+         <div class="label-mini">The module's provider registry</div>
+         <div class="node" style="padding:6px 0;">
+           <table class="registry" id="s5-reg">
+             <thead><tr><th>token (key)</th><th>provider</th></tr></thead>
+             <tbody>
+               <tr id="reg-ds"><td><code>DOCUMENT_SOURCE</code></td><td><code>useClass: LocalFileDocumentSource</code></td></tr>
+               <tr id="reg-parser"><td><code>PARSER</code></td><td><code>useClass: StubParser</code></td></tr>
+               <tr id="reg-svc"><td><code>IngestionService</code></td><td><code>(self)</code></td></tr>
+             </tbody>
+           </table>
+         </div>
+         <div class="summary-out" id="s5-result">Step through to watch Nest resolve a parameter.</div>
+       </div>
+     </div>`,
+  steps: [
+    { title:"Startup: Nest must build IngestionService", mode:"good", active:["s5-ctor"], tag:{kind:"neutral",label:"happy path"},
+      text:`At boot Nest wants to construct <code>IngestionService</code>. To call <code>new</code> it must supply every constructor argument. It reads the params left to right. We'll follow the <b>second</b> one: <code>@Inject(PARSER) parser: Parser</code>.`,
+      sec:`Nest does this for <i>every</i> provider at startup, recursively — it builds a dependency graph and instantiates in order. A missing edge crashes the boot.`,
+      ctor:"@Inject(PARSER) parser: Parser", lookup:"—", inst:"—", reg:null, result:"Nest sees a param it must fill." },
+    { title:"Read the @Inject token off the param", mode:"good", active:["s5-ctor"], tag:{kind:"neutral",label:"key = PARSER"},
+      text:`The <code>@Inject(PARSER)</code> decorator tells Nest the lookup key explicitly: <b>PARSER</b>. (Without <code>@Inject</code>, Nest falls back to the param's reflected <i>type</i> as the key — important in the broken case.)`,
+      sec:`A decorator is metadata attached to the param. <code>@Inject(X)</code> literally records "resolve this param using token X."`,
+      ctor:"@Inject(PARSER) parser: Parser", lookup:"key = PARSER", inst:"—", reg:null, result:"Lookup key resolved to: PARSER" },
+    { title:"Find the matching provider in the registry", mode:"good", active:["s5-lookup"], tag:{kind:"good",label:"match"},
+      text:`Nest searches the module's <span class="term">provider registry</span> — the list of <code>{ provide, useClass }</code> entries — for an entry whose <code>provide</code> equals <code>PARSER</code>. It finds <code>{ provide: PARSER, useClass: StubParser }</code>. <b>Match.</b>`,
+      sec:`The registry is just the module's <code>providers: [...]</code> array, indexed by token. Symbols compare by identity, so <code>PARSER</code> matches only the exact same Symbol.`,
+      ctor:"@Inject(PARSER) parser: Parser", lookup:"key = PARSER", inst:"—", reg:"parser", result:"Found: useClass StubParser" },
+    { title:"Instantiate the class, hand it to the field", mode:"good", active:["s5-inst"], tag:{kind:"good",label:"injected"},
+      text:`The entry says <code>useClass: StubParser</code>, so Nest does <code>new StubParser()</code> and assigns that instance to <code>this.parser</code>. The service now has a working parser — typed as <code>Parser</code>, ignorant of <code>StubParser</code>.`,
+      sec:`If <code>StubParser</code> had its own constructor deps, Nest would resolve those first, recursively, before this <code>new</code>. Here it has none.`,
+      ctor:"@Inject(PARSER) parser: Parser", lookup:"key = PARSER", inst:"new StubParser() → this.parser", reg:"parser", result:"<span class='green'>✓ this.parser = StubParser instance</span>" },
+    { title:"THE BUG: two @Inject on one param", mode:"bad", active:["s5-ctor"], tag:{kind:"bad",label:"what happened"},
+      text:`The version that actually broke stacked <b>both</b> decorators on <b>one</b> param and left the second param bare. Both <code>@Inject(DOCUMENT_SOURCE)</code> and <code>@Inject(PARSER)</code> target that single <code>source</code> param — they <b>collide</b>. Last one applied wins; <code>DOCUMENT_SOURCE</code> wins, <code>PARSER</code> is silently swallowed.`,
+      sec:`A decorator binds to the parameter it sits on. Two on one param both describe that param — there's no second param for the second decorator to reach.`,
+      ctor:"@Inject(DOCUMENT_SOURCE) @Inject(PARSER) source ⚠", lookup:"param 0 ← DOCUMENT_SOURCE wins", inst:"PARSER decorator discarded", reg:"ds-bad", result:"<span style='color:var(--bad)'>param 0 resolved; PARSER lost</span>", bad:true },
+    { title:"...so param 2 has no token → reflected type", mode:"bad", active:["s5-ctor"], tag:{kind:"bad",label:"wrong key"},
+      text:`Now the second param <code>parser: Parser</code> has <b>no</b> <code>@Inject</code>. Nest falls back to its default: use the param's <b>reflected type</b> as the token. But <code>Parser</code> is an interface — erased — so the emitted type is... whatever class TS reflected, e.g. <code>StubParser</code>. Nest looks up token <code>StubParser</code>.`,
+      sec:`TS only emits a runtime type for classes, not interfaces. So the reflected token is a class reference, not the <code>PARSER</code> Symbol you registered — a key that isn't in the registry.`,
+      ctor:"parser: Parser  // no @Inject", lookup:"key = StubParser (reflected type)", inst:"—", reg:"miss", result:"<span style='color:var(--bad)'>token StubParser — not in registry</span>", bad:true },
+    { title:"No registry entry → UnknownDependenciesException", mode:"bad", active:["s5-lookup"], tag:{kind:"bad",label:"boot crash"},
+      text:`The registry has entries for <code>PARSER</code> and <code>DOCUMENT_SOURCE</code> — <b>not</b> for token <code>StubParser</code>. No match. Nest can't fill the param, can't call <code>new IngestionService(...)</code>, and throws <span class="term">UnknownDependenciesException</span> at startup. The app never boots.`,
+      sec:`The fix is the boring one: one <code>@Inject</code> per param, each on its own param — exactly the working constructor in section 4. Side by side: collision vs. one-token-per-param.`,
+      ctor:"parser: Parser  // no @Inject", lookup:"key = StubParser → MISS", inst:"cannot construct", reg:"miss", result:"<span style='color:var(--bad)'>✗ UnknownDependenciesException — boot fails</span>", bad:true },
+  ],
+};
+
+/* ---------- SECTION 6: the stub as permanent fixture ---------- */
+const S6 = {
+  name: "The stub",
+  stage: `<div class="row"><div class="col">${codeBlock(SRC.stub)}</div></div>`,
+  steps: [
+    { title:"It ignores the bytes on purpose", active:["L21","L22","L23"], tag:{kind:"neutral",label:"_bytes"},
+      text:`<code>parse(_bytes: Buffer)</code> takes the bytes and never reads them — the leading underscore signals "deliberately unused." It just returns <code>mock</code>. A stub <span class="term">stands in for</span> the real thing with a fixed canned answer.`,
+      sec:`The real parser (TBA-4) <i>will</i> read those bytes and call Azure. Same signature, same token — so the swap is invisible to the service (section 4).` },
+    { title:"The mock is transcribed from the REAL PDF", active:["L3","L4","L5","L6","L7"], tag:{kind:"good",label:"honest data"},
+      text:`<code>mock</code> is a hand-typed <code>Element[]</code> copied from the actual sample policy (<code>icb58-travel-expenses-2024.pdf</code>, Appendix 3, page 17). Real heading, real paragraphs, a real mileage table — <b>correct page numbers</b>. It looks like what Azure will eventually produce.`,
+      sec:`"Honest data" matters: downstream tests assert against this. If the fixture were fake-shaped, passing tests would prove nothing about the real document.` },
+    { title:"confidence: 1 — a stub is certain by definition", active:["L13"], tag:{kind:"neutral",label:"confidence"},
+      text:`The table carries <code>confidence: 1</code>. <span class="term">Confidence</span> is the parser's OCR certainty — "how sure that glyph is '59 pence'." A hand-typed stub has no OCR doubt, so it's a flat <code>1</code>. Real, sub-1 confidence arrives with Azure in TBA-4.`,
+      sec:`Per <code>§3</code>: confidence is OCR-only, an <i>ordering hint</i> for the human reviewer — never a gate. The stub just needs the field present and honest.` },
+    { title:"Not throwaway — a permanent test fixture", active:["L1"], tag:{kind:"good",label:"why it lasts"},
+      text:`The stub isn't scaffolding you delete after TBA-4. It becomes the <b>permanent fixture</b> chunk/embed/extract tests run against — <b>forever</b>. Those tests must never call a paid Azure API over the network: slow, flaky, costs money.`,
+      sec:`So even after the Azure parser ships, this stub stays. Production uses Azure; the test suite uses the stub. Both satisfy the same <code>Parser</code> interface.` },
+  ],
+};
+
+/* ---------- SECTION 7: the reduce summary ---------- */
+const S7 = {
+  name: "reduce summary",
+  stage:
+    `<div class="row">
+       <div class="col" style="flex:1.1;">${codeBlock(SRC.service)}</div>
+       <div class="col" style="flex:.9;">
+         <div class="label-mini">The tally being built</div>
+         <div class="node"><div class="summary-out" id="s7-acc" style="min-height:70px;">{}</div></div>
+         <div class="label-mini" style="margin-top:6px;">Final log line</div>
+         <div class="node"><div class="summary-out" id="s7-log" style="min-height:40px;">—</div></div>
+       </div>
+     </div>`,
+  steps: [
+    { title:"The one place the service must understand elements", active:["L8","L9"], tag:{kind:"neutral",label:"the consumer"},
+      text:`Everywhere else the service is ignorant of <i>what</i> it holds. <code>onModuleInit</code> is the exception: after <code>parse(bytes)</code> it has an <code>Element[]</code> and must <b>summarize</b> it — count how many of each kind came back.`,
+      sec:`<code>onModuleInit</code> is a Nest lifecycle hook — it runs once, after the module's dependencies are wired. Perfect spot for a startup smoke check.`,
+      acc:"{}", log:"—" },
+    { title:"reduce = fold a list into one accumulator", active:["L10","L13"], tag:{kind:"neutral",label:"reduce"},
+      text:`<code>reduce</code> walks the array carrying an <span class="term">accumulator</span> — a running value threaded through each step. Here it starts as <code>{}</code> (the second arg). Each element gets a turn to update it; the final accumulator is the result.`,
+      sec:`Signature: <code>reduce((acc, item) => newAcc, initial)</code>. The callback <b>must return</b> the accumulator each time — forget the <code>return</code> and the next step gets <code>undefined</code>.`,
+      acc:"{}", log:"—" },
+    { title:"Tally on the discriminant", active:["L11","L12"], tag:{kind:"good",label:"narrows on type"},
+      text:`The body is the tally: <code>counts[element.type] = (counts[element.type] || 0) + 1</code>. It reads <code>element.type</code> — the same <span class="term">discriminant</span> from section 3 — and bumps that key. <code>|| 0</code> handles the first time a type is seen.`,
+      sec:`Watch the accumulator fill as the 4 elements stream through: heading→1, paragraph→1, table→1, paragraph→2.`,
+      acc:"{ heading:1, paragraph:2, table:1 }", log:"—" },
+    { title:"Log the computed summary", active:["L15","L16","L17","L18"], tag:{kind:"good",label:"boots clean"},
+      text:`Finally it logs <code>elements.length</code> plus the tally — <b>computed</b>, never hardcoded. On <code>npm run start:dev</code> you see the summary line; that's the ticket's done-signal: bytes became a typed list the service could count.`,
+      sec:`Heads-up on the real code: the count uses <code>elements.length</code> (4) — correct. An earlier draft used <code>Object.keys(elements).length</code>, which also gives 4 here only because the array's keys are its indices. Prefer <code>.length</code> for clarity.`,
+      acc:"{ heading:1, paragraph:2, table:1 }", log:"Parsed 4 elements: { heading:1, paragraph:2, table:1 }" },
+  ],
+};
+
+const SECTIONS = [S1,S2,S3,S4,S5,S6,S7];
+
+/* ── stepper engine over sections ───────────────────────────────────────── */
+let sec = 0, i = 0, playing = false, timer = null;
+const stage = document.getElementById("stage");
+const dotsWrap = document.getElementById("dots");
+const tabsWrap = document.getElementById("tabs");
+
+SECTIONS.forEach((s, idx) => {
+  const t = document.createElement("button");
+  t.className = "tab";
+  t.innerHTML = '<span class="num">'+(idx+1)+'</span>'+s.name;
+  t.onclick = () => { stop(); gotoSection(idx); };
+  tabsWrap.appendChild(t);
+});
+
+function gotoSection(n){
+  sec = n; i = 0;
+  stage.innerHTML = SECTIONS[sec].stage;
+  buildDots();
+  document.getElementById("total").textContent = SECTIONS[sec].steps.length - 1;
+  tabsWrap.querySelectorAll(".tab").forEach((t,idx)=>t.classList.toggle("active", idx===sec));
+  render();
+}
+function buildDots(){
+  dotsWrap.innerHTML = "";
+  SECTIONS[sec].steps.forEach((_, idx) => {
+    const d = document.createElement("div");
+    d.className = "dot";
+    d.onclick = () => { stop(); go(idx); };
+    dotsWrap.appendChild(d);
+  });
+}
+
+/* per-section dynamic stage rendering */
+function renderStage(s){
+  if (sec === 2) renderUnion(s);
+  if (sec === 4) renderResolution(s);
+  if (sec === 6) renderReduce(s);
+}
+
+/* SECTION 3 — narrowing object viewer */
+function renderUnion(s){
+  const body = document.getElementById("s3-obj-body");
+  const guard = document.getElementById("s3-guard-txt");
+  if(!body) return;
+  if (s.obj === "table"){
+    body.innerHTML =
+      '<div class="field live"><span class="fk">type</span>: \'table\'</div>'+
+      '<div class="field live"><span class="fk">page</span>: 17</div>'+
+      '<div class="field live"><span class="fk">cells</span>: string[][]</div>'+
+      '<div class="field live"><span class="fk">confidence</span>: 1</div>'+
+      '<div class="field dead"><span class="fk">text</span>: gone</div>';
+  } else {
+    body.innerHTML =
+      '<div class="field"><span class="fk">type</span>: \'heading\'|\'paragraph\'|\'table\'</div>'+
+      '<div class="field"><span class="fk">page</span>: number</div>'+
+      '<div class="field dead"><span class="fk">text?</span>: blocked</div>'+
+      '<div class="field dead"><span class="fk">cells?</span>: blocked</div>';
+  }
+  guard.textContent = s.guard || "";
+}
+
+/* SECTION 5 — DI resolution flow */
+function renderResolution(s){
+  const set = (id,val)=>{ const el=document.getElementById(id); if(el) el.textContent = val; };
+  set("s5-ctor-txt", s.ctor);
+  set("s5-lookup-txt", s.lookup);
+  set("s5-inst-txt", s.inst);
+  const mode = document.getElementById("s5-mode");
+  if(mode) mode.textContent = (s.mode === "bad")
+    ? "BROKEN — what actually happened" : "Nest resolving IngestionService at startup";
+  if(mode) mode.style.color = (s.mode === "bad") ? "var(--bad)" : "var(--ink-dim)";
+  // registry highlight
+  ["reg-ds","reg-parser","reg-svc"].forEach(id=>{ const r=document.getElementById(id); if(r) r.className=""; });
+  if (s.reg === "parser"){ const r=document.getElementById("reg-parser"); if(r) r.className="match"; }
+  if (s.reg === "ds-bad"){ const r=document.getElementById("reg-ds"); if(r) r.className="match"; }
+  if (s.reg === "miss"){ ["reg-ds","reg-parser"].forEach(id=>{const r=document.getElementById(id); if(r) r.className="miss";}); }
+  const res = document.getElementById("s5-result");
+  if(res) res.innerHTML = s.result;
+}
+
+/* SECTION 7 — reduce tally */
+function renderReduce(s){
+  const acc = document.getElementById("s7-acc");
+  const log = document.getElementById("s7-log");
+  if(acc) acc.textContent = s.acc;
+  if(log) log.innerHTML = (s.log === "—") ? "—" : '<span class="green">'+s.log+'</span>';
+}
+
+function render(){
+  const s = SECTIONS[sec].steps[i];
+  document.getElementById("cur").textContent = i;
+
+  const branch = s.tag ? (s.tag.kind === "good" ? "good" : s.tag.kind === "bad" ? "bad" : "") : "";
+  stage.querySelectorAll(".node, .code-line").forEach(el => {
+    const on = (s.active || []).includes(el.id);
+    el.classList.toggle("hot", on);
+    el.classList.toggle("good", on && branch === "good");
+    el.classList.toggle("bad",  on && (branch === "bad" || s.bad));
+  });
+
+  let titleHtml = s.title;
+  if (s.tag) titleHtml += '<span class="step-tag '+s.tag.kind+'">'+s.tag.label+'</span>';
+  document.getElementById("step-title").innerHTML = titleHtml;
+  document.getElementById("step-text").innerHTML = s.text;
+
+  const secEl = document.getElementById("step-secondary");
+  secEl.className = s.sec ? "secondary-body" : "secondary-none";
+  secEl.innerHTML = s.sec || "Keep stepping.";
+
+  renderStage(s);
+
+  dotsWrap.querySelectorAll(".dot").forEach((d, idx) => {
+    d.classList.toggle("active", idx === i);
+    d.classList.toggle("done", idx < i);
+  });
+  document.getElementById("prev").disabled = (sec === 0 && i === 0);
+  document.getElementById("next").disabled = (sec === SECTIONS.length-1 && i === SECTIONS[sec].steps.length - 1);
+}
+
+function go(n){
+  const steps = SECTIONS[sec].steps;
+  if (n < 0){ if (sec > 0){ stop(); gotoSection(sec-1); i = SECTIONS[sec].steps.length-1; render(); } return; }
+  if (n > steps.length-1){ if (sec < SECTIONS.length-1){ stop(); gotoSection(sec+1); } return; }
+  i = n; render();
+}
+function stop(){ playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶ Play"; }
+
+document.getElementById("next").onclick = () => { stop(); go(i + 1); };
+document.getElementById("prev").onclick = () => { stop(); go(i - 1); };
+document.getElementById("play").onclick = () => {
+  if (playing) { stop(); return; }
+  playing = true;
+  document.getElementById("play").textContent = "❚❚ Pause";
+  timer = setInterval(() => {
+    const last = (sec === SECTIONS.length-1 && i === SECTIONS[sec].steps.length-1);
+    if (last) { stop(); return; }
+    go(i + 1);
+  }, 3400);
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); go(i + 1); }
+  if (e.key === "ArrowLeft")  { stop(); go(i - 1); }
+});
+
+gotoSection(0);
+</script>
+</body>
+</html>

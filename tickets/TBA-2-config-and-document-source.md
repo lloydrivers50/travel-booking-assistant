@@ -23,7 +23,10 @@ This ticket introduces the seam that makes the eventual Azure swap a non-event:
   The service depends on the interface; the implementation is swapped behind a DI
   token. This is the same dependency-inversion you did with InversifyJS.
 
-When TBA-3 adds `AzureBlobDocumentSource`, nothing in `IngestionService` changes.
+When a later ticket adds `AzureBlobDocumentSource` (TBA-4), nothing in
+`IngestionService` changes. (TBA-3 was resequenced to the `Parser` seam — a separate
+abstraction: `DocumentSource` says *where bytes come from*, `Parser` says *what bytes
+become*.)
 
 ## Nest concepts in play (new to you — read these)
 

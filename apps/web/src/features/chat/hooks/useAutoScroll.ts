@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallbackRef } from "@/shared/lib/use-callback-ref";
+import { useStableCallback } from "@/shared/lib/use-stable-callback";
 import { useEffect, useRef, useState } from "react";
 
 /**
@@ -12,7 +12,7 @@ export function useAutoScroll<T>(dep: T) {
   const ref = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
 
-  const onScroll = useCallbackRef(() => {
+  const onScroll = useStableCallback(() => {
     const el = ref.current;
     if (!el) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
